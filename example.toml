@@ -1,12 +1,10 @@
-[logging]
-log_file = "/tmp/claude-tool-use.log"
-# Log level: trace, debug, info, warn, error (default: info)
-# - trace: logs every rule evaluation and match attempt
-# - debug: logs rule matches and exclude skips
-# - info: logs allow/deny decisions only
-# - warn/error: minimal logging
-# Note: Can be overridden by RUST_LOG environment variable for testing
-log_level = "debug"
+[audit]
+audit_file = "/tmp/claude-tool-use.json"
+# Audit level: off, matched (default), all
+# - off: no auditing
+# - matched: audit only tool use that hits a rule (allow/deny)
+# - all: audit everything including passthrough
+audit_level = "matched"
 
 # Allow rules - checked after deny rules
 [[allow]]

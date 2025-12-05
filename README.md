@@ -31,14 +31,13 @@ The binary will be at `target/release/claude-code-permissions-hook`
 Create a TOML configuration file (see `example.toml`):
 
 ```toml
-[logging]
-log_file = "/tmp/claude-tool-use.log"
-# Log level: trace, debug, info, warn, error (default: info)
-# - trace: logs every rule evaluation and match attempt
-# - debug: logs rule matches and exclude skips
-# - info: logs allow/deny decisions only
-# - warn/error: minimal logging
-log_level = "info"
+[audit]
+audit_file = "/tmp/claude-tool-use.json"
+# Audit level: off, matched (default), all
+# - off: no auditing
+# - matched: audit only tool use that hits a rule (allow/deny)
+# - all: audit everything including passthrough
+audit_level = "matched"
 
 # Allow rules - checked after deny rules
 [[allow]]
@@ -228,16 +227,28 @@ cargo clippy
 cargo fmt
 ```
 
-### Logging
+## Logging
 
-Set `log_level` in the TOML config file (trace, debug, info, warn, error). Defaults to "info". Can be overridden with `RUST_LOG` environment variable for testing.
+### Audit File (JSON)
 
-## Log Format
+Records tool use to the file specified by `audit_file`. Controlled by `audit_level` in TOML:
 
-Logs are written in JSON format, one entry per line:
+- `off` - disabled
+- `matched` (default) - records only allow/deny decisions
+- `all` - records everything including passthrough
+
+Format (one JSON object per line):
 
 ```json
-{"timestamp":"2025-10-06T10:27:59Z","session_id":"abc123","tool_name":"Read","tool_input":{...},"cwd":"/path"}
+{"timestamp":"2025-10-06T10:27:59Z","session_id":"abc123","tool_name":"Read","tool_input":{...},"decision":"allow","reason":"Matched rule...","cwd":"/path"}
+```
+
+### Diagnostic Log (stderr)
+
+For debugging rule matching. Controlled by `RUST_LOG` environment variable:
+
+```bash
+RUST_LOG=debug cargo run -- run --config example.toml
 ```
 
 ## License

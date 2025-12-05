@@ -9,22 +9,31 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub logging: LoggingConfig,
+    pub audit: AuditConfig,
     #[serde(default)]
     pub allow: Vec<RuleConfig>,
     #[serde(default)]
     pub deny: Vec<RuleConfig>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct LoggingConfig {
-    pub log_file: PathBuf,
-    #[serde(default = "default_log_level")]
-    pub log_level: String,
+/// Controls what gets written to the audit log file.
+#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AuditLevel {
+    /// No audit logging
+    Off,
+    /// Log only tool use that matches a rule (default)
+    #[default]
+    Matched,
+    /// Log all tool use including passthrough
+    All,
 }
 
-fn default_log_level() -> String {
-    "info".to_string()
+#[derive(Debug, Deserialize)]
+pub struct AuditConfig {
+    pub audit_file: PathBuf,
+    #[serde(default)]
+    pub audit_level: AuditLevel,
 }
 
 #[derive(Debug, Deserialize)]
