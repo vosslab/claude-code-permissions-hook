@@ -5,13 +5,8 @@ use crate::config::Rule;
 use crate::hook_io::HookInput;
 use log::{debug, trace};
 
-#[derive(Debug)]
-pub enum Decision {
-    Allow(String),
-    Deny(String),
-}
-
-pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<Decision> {
+/// Checks rules against input, returning the reason if a rule matches.
+pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<String> {
     trace!(
         "Checking {} rules for tool: {}",
         rules.len(),
@@ -34,7 +29,7 @@ pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<Decision> {
     None
 }
 
-fn check_rule(rule: &Rule, input: &HookInput) -> Option<Decision> {
+fn check_rule(rule: &Rule, input: &HookInput) -> Option<String> {
     match input.tool_name.as_str() {
         "Read" | "Write" | "Edit" | "Glob" => {
             if let Some(file_path) = input.extract_field("file_path")
@@ -44,10 +39,10 @@ fn check_rule(rule: &Rule, input: &HookInput) -> Option<Decision> {
                     &rule.file_path_exclude_regex,
                 )
             {
-                return Some(Decision::Allow(format!(
+                return Some(format!(
                     "Matched rule for {} with file_path: {}",
                     input.tool_name, file_path
-                )));
+                ));
             }
         }
         "Bash" => {
@@ -58,27 +53,22 @@ fn check_rule(rule: &Rule, input: &HookInput) -> Option<Decision> {
                     &rule.command_exclude_regex,
                 )
             {
-                return Some(Decision::Allow(format!(
-                    "Matched rule for Bash with command: {}",
-                    command
-                )));
+                return Some(format!("Matched rule for Bash with command: {}", command));
             }
         }
         "Task" => {
             if let Some(subagent_type) = input.extract_field("subagent_type")
                 && check_subagent_type(rule, &subagent_type)
             {
-                return Some(Decision::Allow(format!(
+                return Some(format!(
                     "Matched rule for Task with subagent_type: {}",
                     subagent_type
-                )));
+                ));
             }
             if let Some(prompt) = input.extract_field("prompt")
                 && check_field_with_exclude(&prompt, &rule.prompt_regex, &rule.prompt_exclude_regex)
             {
-                return Some(Decision::Allow(
-                    "Matched rule for Task with prompt pattern".to_string(),
-                ));
+                return Some("Matched rule for Task with prompt pattern".to_string());
             }
         }
         _ => {}

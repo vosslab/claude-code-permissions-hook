@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use crate::config::Config;
 use crate::hook_io::{HookInput, HookOutput};
 use crate::logging::log_tool_use;
-use crate::matcher::{Decision, check_rules};
+use crate::matcher::check_rules;
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about = "Claude Code command permissions hook")]
@@ -52,29 +52,17 @@ fn run_hook(config_path: PathBuf) -> Result<()> {
     log_tool_use(&config.logging.log_file, &input);
 
     // Check deny rules first
-    if let Some(decision) = check_rules(&deny_rules, &input) {
-        let reason = match decision {
-            Decision::Deny(r) | Decision::Allow(r) => r,
-        };
+    if let Some(reason) = check_rules(&deny_rules, &input) {
         let output = HookOutput::deny(reason);
         output.write_to_stdout()?;
         return Ok(());
     }
 
     // Check allow rules
-    if let Some(decision) = check_rules(&allow_rules, &input) {
-        match decision {
-            Decision::Allow(reason) => {
-                let output = HookOutput::allow(reason);
-                output.write_to_stdout()?;
-                return Ok(());
-            }
-            Decision::Deny(reason) => {
-                let output = HookOutput::deny(reason);
-                output.write_to_stdout()?;
-                return Ok(());
-            }
-        }
+    if let Some(reason) = check_rules(&allow_rules, &input) {
+        let output = HookOutput::allow(reason);
+        output.write_to_stdout()?;
+        return Ok(());
     }
 
     // No match - exit with no output (normal flow)
