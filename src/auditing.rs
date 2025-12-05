@@ -20,6 +20,9 @@ pub enum Decision {
     Passthrough,
 }
 
+/// Maximum length for tool_input in audit entries (in characters when serialized).
+const MAX_TOOL_INPUT_LEN: usize = 1024;
+
 #[derive(Debug, Serialize)]
 struct AuditEntry {
     timestamp: DateTime<Utc>,
@@ -30,6 +33,17 @@ struct AuditEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
     cwd: String,
+}
+
+/// Truncate tool_input if its serialized form exceeds `MAX_TOOL_INPUT_LEN` characters.
+fn truncate_tool_input(input: &serde_json::Value) -> serde_json::Value {
+    let serialized = serde_json::to_string(input).unwrap_or_default();
+    if serialized.len() <= MAX_TOOL_INPUT_LEN {
+        input.clone()
+    } else {
+        let truncated: String = serialized.chars().take(MAX_TOOL_INPUT_LEN).collect();
+        serde_json::Value::String(truncated + "…")
+    }
 }
 
 /// Write tool use to the audit file, respecting the configured audit level.
@@ -65,7 +79,7 @@ fn try_audit_tool_use(
         timestamp: Utc::now(),
         session_id: input.session_id.clone(),
         tool_name: input.tool_name.clone(),
-        tool_input: input.tool_input.clone(),
+        tool_input: truncate_tool_input(&input.tool_input),
         decision,
         reason: reason.map(String::from),
         cwd: input.cwd.clone(),
@@ -85,4 +99,29 @@ fn try_audit_tool_use(
     flock.unlock().map_err(|(_, e)| e)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_truncate_tool_input_short() {
+        let input = json!({"file_path": "/some/short/path.rs"});
+        let result = truncate_tool_input(&input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_truncate_tool_input_long() {
+        let long_content = "x".repeat(2000);
+        let input = json!({"content": long_content});
+        let result = truncate_tool_input(&input);
+
+        let truncated = result.as_str().unwrap();
+        assert!(truncated.ends_with('…'));
+        // 1024 chars + ellipsis
+        assert_eq!(truncated.chars().count(), MAX_TOOL_INPUT_LEN + 1);
+    }
 }

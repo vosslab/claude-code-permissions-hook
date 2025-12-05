@@ -4,21 +4,16 @@
 #![warn(rust_2024_compatibility)]
 #![warn(deprecated_safe)]
 
-pub mod auditing;
-pub mod config;
-pub mod hook_io;
-pub mod matcher;
-
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use env_logger::Env;
 use log::info;
 use std::path::PathBuf;
 
-use crate::auditing::{Decision, audit_tool_use};
-use crate::config::Config;
-use crate::hook_io::{HookInput, HookOutput};
-use crate::matcher::check_rules;
+use claude_code_permissions_hook::auditing::audit_tool_use;
+use claude_code_permissions_hook::{
+    Decision, HookInput, HookOutput, load_config, process_hook_input_with_config, validate_config,
+};
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about = "Claude Code command permissions hook")]
@@ -42,59 +37,51 @@ enum Commands {
 }
 
 fn run_hook(config_path: PathBuf) -> Result<()> {
-    let config = Config::load_from_file(&config_path).context("Failed to load configuration")?;
-
-    let (deny_rules, allow_rules) = config.compile_rules().context("Failed to compile rules")?;
+    let (config, deny_rules, allow_rules) =
+        load_config(&config_path).context("Failed to load configuration")?;
 
     let input = HookInput::read_from_stdin().context("Failed to read hook input")?;
 
-    // Check deny rules first
-    if let Some(reason) = check_rules(&deny_rules, &input) {
-        audit_tool_use(
-            &config.audit.audit_file,
-            config.audit.audit_level,
-            &input,
-            Decision::Deny,
-            Some(&reason),
-        );
-        let output = HookOutput::deny(reason);
-        output.write_to_stdout()?;
-        return Ok(());
-    }
+    let result = process_hook_input_with_config(&config, &input)?;
 
-    // Check allow rules
-    if let Some(reason) = check_rules(&allow_rules, &input) {
-        audit_tool_use(
-            &config.audit.audit_file,
-            config.audit.audit_level,
-            &input,
-            Decision::Allow,
-            Some(&reason),
-        );
-        let output = HookOutput::allow(reason);
-        output.write_to_stdout()?;
-        return Ok(());
-    }
-
-    // No match - passthrough to normal Claude Code permission flow
+    // Audit the decision
     audit_tool_use(
         &config.audit.audit_file,
         config.audit.audit_level,
         &input,
-        Decision::Passthrough,
-        None,
+        result.decision,
+        result.reason.as_deref(),
     );
+
+    // Output decision to stdout (passthrough = no output)
+    match result.decision {
+        Decision::Allow => {
+            let output = HookOutput::allow(result.reason.unwrap_or_default());
+            output.write_to_stdout()?;
+        }
+        Decision::Deny => {
+            let output = HookOutput::deny(result.reason.unwrap_or_default());
+            output.write_to_stdout()?;
+        }
+        Decision::Passthrough => {
+            // No output for passthrough
+        }
+    }
+
+    // Suppress unused variable warning - rules are used for config validation
+    let _ = (deny_rules, allow_rules);
+
     Ok(())
 }
 
-fn validate_config(config_path: PathBuf) -> Result<()> {
-    let config = Config::load_from_file(&config_path).context("Failed to load configuration")?;
+fn run_validate_config(config_path: PathBuf) -> Result<()> {
+    let (deny_count, allow_count) = validate_config(&config_path)?;
 
-    let (deny_rules, allow_rules) = config.compile_rules().context("Failed to compile rules")?;
+    let config = claude_code_permissions_hook::Config::load_from_file(&config_path)?;
 
     info!("Configuration is valid!");
-    info!("  Deny rules: {}", deny_rules.len());
-    info!("  Allow rules: {}", allow_rules.len());
+    info!("  Deny rules: {}", deny_count);
+    info!("  Allow rules: {}", allow_count);
     info!("  Audit file: {}", config.audit.audit_file.display());
     info!("  Audit level: {:?}", config.audit.audit_level);
 
@@ -109,6 +96,6 @@ fn main() -> Result<()> {
 
     match opts.command {
         Commands::Run { config } => run_hook(config),
-        Commands::Validate { config } => validate_config(config),
+        Commands::Validate { config } => run_validate_config(config),
     }
 }

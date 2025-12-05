@@ -100,23 +100,13 @@ cargo run -- validate --config example.toml
 echo '<hook-input-json>' | cargo run -- run --config example.toml
 ```
 
-### Test Cases
-
-See `tests/` directory for sample inputs:
+### Run Tests
 
 ```bash
-# Test allowed Read
-cat tests/read_allowed.json | cargo run -- run --config example.toml
-
-# Test denied path traversal
-cat tests/read_path_traversal.json | cargo run -- run --config example.toml
-
-# Test allowed Bash command
-cat tests/bash_allowed.json | cargo run -- run --config example.toml
-
-# Test unknown tool (passthrough - no output)
-cat tests/unknown_tool.json | cargo run -- run --config example.toml
+cargo test
 ```
+
+See `tests/` directory for integration tests and sample JSON inputs.
 
 ## How It Works
 
@@ -177,6 +167,7 @@ flowchart TB
 ### Rule Matching Logic
 
 For each rule:
+
 1. Check if tool name matches
 2. Extract relevant field from tool_input (file_path, command, subagent_type, or prompt)
 3. Check if main regex matches
@@ -192,6 +183,7 @@ For each rule:
 ## Security Patterns
 
 ### Path Traversal Prevention
+
 ```toml
 [[allow]]
 tool = "Read"
@@ -200,6 +192,7 @@ file_path_exclude_regex = "\\.\\."  # Block ../
 ```
 
 ### Shell Injection Prevention
+
 ```toml
 [[allow]]
 tool = "Bash"
@@ -208,6 +201,7 @@ command_exclude_regex = "&|;|\\||`|\\$\\("  # Block shell metacharacters
 ```
 
 ### Sensitive File Protection
+
 ```toml
 [[deny]]
 tool = "Read"
@@ -216,15 +210,10 @@ file_path_regex = "\\.(env|secret|key)$"
 
 ## Development
 
-### Run Tests
 ```bash
-cargo test
-```
-
-### Check Code
-```bash
-cargo clippy
-cargo fmt
+cargo test      # Run tests
+cargo clippy    # Lint code
+cargo fmt       # Format code
 ```
 
 ## Logging

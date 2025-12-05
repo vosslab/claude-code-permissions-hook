@@ -1,49 +1,37 @@
-# Test Cases
+# Test Directory
 
-This directory contains sample JSON inputs for testing the command permissions hook.
+This directory contains integration tests and test fixtures for the command permissions hook.
+
+## Structure
+
+- `integration_test.rs` - Rust integration tests that test the library's public API
+- `test_config.toml` - Configuration file designed for the test fixtures
+- `*.json` - Test fixture files with sample hook inputs
 
 ## Running Tests
 
-First, build the project:
 ```bash
-cargo build
+cargo test
 ```
 
-Then test each scenario:
+To run only the integration tests:
 
-### 1. Read allowed (should allow)
 ```bash
-cat tests/read_allowed.json | cargo run -- run --config example.toml
+cargo test --test integration_test
 ```
-Expected: Allow with reason
 
-### 2. Read with path traversal (should deny)
-```bash
-cat tests/read_path_traversal.json | cargo run -- run --config example.toml
-```
-Expected: Deny with reason
+## Test Fixtures
 
-### 3. Bash with shell injection (should deny)
-```bash
-cat tests/bash_injection.json | cargo run -- run --config example.toml
-```
-Expected: Deny with reason
+The JSON files are sample hook inputs used by the integration tests:
 
-### 4. Bash allowed (should allow)
-```bash
-cat tests/bash_allowed.json | cargo run -- run --config example.toml
-```
-Expected: Allow with reason
+| File | Description | Expected Result |
+|------|-------------|-----------------|
+| `read_allowed.json` | Read within allowed path | Allow |
+| `read_path_traversal.json` | Read with `../` in path | Deny |
+| `bash_allowed.json` | Safe `cargo test` command | Allow |
+| `bash_injection.json` | Command with `&&` injection | Deny |
+| `unknown_tool.json` | Unrecognized tool name | Passthrough |
 
-### 5. Unknown tool (should passthrough)
-```bash
-cat tests/unknown_tool.json | cargo run -- run --config example.toml
-```
-Expected: No output (passthrough)
+## Test Configuration
 
-## Validate Config
-
-To validate the example configuration:
-```bash
-cargo run -- validate --config example.toml
-```
+The tests use `test_config.toml` which has rules matching the test fixtures. This is separate from `example.toml` in the project root, which demonstrates a real-world configuration.
