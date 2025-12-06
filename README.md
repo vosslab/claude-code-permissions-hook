@@ -8,15 +8,19 @@ However this may well be a short-lived application; all the AI tools are moving 
 
 ## Disclaimer
 
-This has been largely "vibe coded" - I have checked all the code myself, but mostly just for flaws not for quality; I can't claim it is the best code out there! When time permits I might give it more love.
+This has been largely "vibe coded" - I have cleaned it up a bit but it's still a bit verbose for my liking.
 
 ## Features
 
-- All configuration is via a single `.toml` file - see [example.toml](./example.toml) for an example.
-- You can allow tool/command combinations with specific regular-expression based filters
-- You can also deny tool/command combinations similarly
-- There is an extra "Allow X but not if Y matches" logic so you can keep regular expressions simpler for common cases
-- Extensive logging is included - if you set logging to "verbose" it will log every PreToolUse call, very handy for diagnosing problems
+- All configuration is via a single `.toml` file - see [example.toml](./example.toml) for an example
+- Allow/deny rules with regex pattern matching for tool inputs
+- Exclude patterns for handling edge cases (e.g., block `..` in allowed paths)
+- Audit logging of tool use decisions to JSON file
+
+## Documentation
+
+- **[Configuration Guide](./docs/configuration-guide.md)** - How to write rules for each supported tool
+- **[Tool Input Schemas](./docs/tool-input-schemas.md)** - Reference for Claude Code tool input formats
 
 ## Installation
 
@@ -176,37 +180,13 @@ For each rule:
 
 ### Supported Tools
 
-- **Read/Write/Edit/Glob**: Match on `file_path`
-- **Bash**: Match on `command`
-- **Task**: Match on `subagent_type` or `prompt`
+| Tool | Matched Field | Config Fields |
+|------|---------------|---------------|
+| Read, Write, Edit, Glob | `file_path` | `file_path_regex`, `file_path_exclude_regex` |
+| Bash | `command` | `command_regex`, `command_exclude_regex` |
+| Task | `subagent_type` or `prompt` | `subagent_type`, `prompt_regex`, `prompt_exclude_regex` |
 
-## Security Patterns
-
-### Path Traversal Prevention
-
-```toml
-[[allow]]
-tool = "Read"
-file_path_regex = "^/safe/directory/.*"
-file_path_exclude_regex = "\\.\\."  # Block ../
-```
-
-### Shell Injection Prevention
-
-```toml
-[[allow]]
-tool = "Bash"
-command_regex = "^(cargo|git|npm) "
-command_exclude_regex = "&|;|\\||`|\\$\\("  # Block shell metacharacters
-```
-
-### Sensitive File Protection
-
-```toml
-[[deny]]
-tool = "Read"
-file_path_regex = "\\.(env|secret|key)$"
-```
+See the [Configuration Guide](./docs/configuration-guide.md) for detailed examples including security patterns for path traversal prevention, shell injection blocking, and sensitive file protection.
 
 ## Development
 

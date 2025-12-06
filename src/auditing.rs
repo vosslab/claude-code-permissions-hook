@@ -20,8 +20,8 @@ pub enum Decision {
     Passthrough,
 }
 
-/// Maximum length for tool_input in audit entries (in characters when serialized).
-const MAX_TOOL_INPUT_LEN: usize = 1024;
+/// Maximum length for string fields in audit entries (in characters).
+const MAX_STRING_LEN: usize = 1024;
 
 #[derive(Debug, Serialize)]
 struct AuditEntry {
@@ -35,14 +35,29 @@ struct AuditEntry {
     cwd: String,
 }
 
-/// Truncate tool_input if its serialized form exceeds `MAX_TOOL_INPUT_LEN` characters.
-fn truncate_tool_input(input: &serde_json::Value) -> serde_json::Value {
-    let serialized = serde_json::to_string(input).unwrap_or_default();
-    if serialized.len() <= MAX_TOOL_INPUT_LEN {
-        input.clone()
-    } else {
-        let truncated: String = serialized.chars().take(MAX_TOOL_INPUT_LEN).collect();
-        serde_json::Value::String(truncated + "…")
+/// Recursively truncate string fields in a JSON value that exceed `max_len` characters.
+fn truncate_json_strings(value: &serde_json::Value, max_len: usize) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(s) => {
+            if s.chars().count() <= max_len {
+                value.clone()
+            } else {
+                let truncated: String = s.chars().take(max_len).collect();
+                serde_json::Value::String(format!("{}… [truncated]", truncated))
+            }
+        }
+        serde_json::Value::Array(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|v| truncate_json_strings(v, max_len))
+                .collect(),
+        ),
+        serde_json::Value::Object(obj) => serde_json::Value::Object(
+            obj.iter()
+                .map(|(k, v)| (k.clone(), truncate_json_strings(v, max_len)))
+                .collect(),
+        ),
+        // Numbers, bools, null pass through unchanged
+        _ => value.clone(),
     }
 }
 
@@ -79,7 +94,7 @@ fn try_audit_tool_use(
         timestamp: Utc::now(),
         session_id: input.session_id.clone(),
         tool_name: input.tool_name.clone(),
-        tool_input: truncate_tool_input(&input.tool_input),
+        tool_input: truncate_json_strings(&input.tool_input, MAX_STRING_LEN),
         decision,
         reason: reason.map(String::from),
         cwd: input.cwd.clone(),
@@ -104,24 +119,77 @@ fn try_audit_tool_use(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]
-    fn test_truncate_tool_input_short() {
-        let input = json!({"file_path": "/some/short/path.rs"});
-        let result = truncate_tool_input(&input);
+    fn test_truncate_short_string_unchanged() {
+        let input = json!("short string");
+        let result = truncate_json_strings(&input, 100);
         assert_eq!(result, input);
     }
 
     #[test]
-    fn test_truncate_tool_input_long() {
-        let long_content = "x".repeat(2000);
-        let input = json!({"content": long_content});
-        let result = truncate_tool_input(&input);
+    fn test_truncate_long_string() {
+        let long_string = "x".repeat(200);
+        let input = json!(long_string);
+        let result = truncate_json_strings(&input, 50);
 
         let truncated = result.as_str().unwrap();
-        assert!(truncated.ends_with('…'));
-        // 1024 chars + ellipsis
-        assert_eq!(truncated.chars().count(), MAX_TOOL_INPUT_LEN + 1);
+        assert!(truncated.ends_with("… [truncated]"));
+        assert!(truncated.starts_with("xxxxxxxxxx"));
+    }
+
+    #[test]
+    fn test_truncate_preserves_object_structure() {
+        let long_content = "y".repeat(200);
+        let input = json!({
+            "file_path": "/short/path.rs",
+            "content": long_content
+        });
+        let result = truncate_json_strings(&input, 50);
+
+        // Structure preserved
+        assert!(result.is_object());
+        let obj = result.as_object().unwrap();
+
+        // Short field unchanged
+        assert_eq!(obj.get("file_path").unwrap(), "/short/path.rs");
+
+        // Long field truncated
+        let content = obj.get("content").unwrap().as_str().unwrap();
+        assert!(content.ends_with("… [truncated]"));
+    }
+
+    #[test]
+    fn test_truncate_nested_structures() {
+        let long_string = "z".repeat(100);
+        let input = json!({
+            "outer": {
+                "inner": long_string.clone()
+            },
+            "array": ["short", long_string]
+        });
+        let result = truncate_json_strings(&input, 20);
+
+        // Nested object string truncated
+        let inner = result["outer"]["inner"].as_str().unwrap();
+        assert!(inner.ends_with("… [truncated]"));
+
+        // Array elements handled
+        assert_eq!(result["array"][0], "short");
+        let arr_long = result["array"][1].as_str().unwrap();
+        assert!(arr_long.ends_with("… [truncated]"));
+    }
+
+    #[test]
+    fn test_truncate_non_strings_unchanged() {
+        let input = json!({
+            "number": 42,
+            "bool": true,
+            "null": null
+        });
+        let result = truncate_json_strings(&input, 10);
+        assert_eq!(result, input);
     }
 }
