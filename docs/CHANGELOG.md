@@ -2,6 +2,10 @@
 
 ## 2026-02-16
 
+- Created [docs/INSTALL.md](INSTALL.md) with requirements, build steps, Claude Code
+  hook setup, and verify command
+- Created [docs/USAGE.md](USAGE.md) with CLI reference, input/output format,
+  examples, audit file descriptions, and test commands
 - Added passthrough logging to `src/auditing.rs`
   - New `audit_passthrough()` function writes JSON-lines entries to a dedicated file
   - Entry format: `{ timestamp, session_id, tool_name, tool_input, cwd }` (no decision/reason)
