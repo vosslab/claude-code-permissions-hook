@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Pytest torture-test harness for the claude-code-permissions-hook binary.
 
@@ -62,7 +61,7 @@ def make_hook_input(tool_name: str, tool_input: dict, session_id: str = "pytest-
 	"""
 	hook_input = {
 		"session_id": session_id,
-		"transcript_path": "/tmp/transcript.jsonl",
+		"transcript_path": "/tmp/transcript.jsonl",  # nosec B108
 		"cwd": "/Users/korny/Dropbox/prj/test",
 		"hook_event_name": "PreToolUse",
 		"tool_name": tool_name,
@@ -558,7 +557,7 @@ def test_grep_allowed_path() -> None:
 	"/etc/secrets",
 	"/home/other/project",
 	"/var/log",
-	"/tmp/stuff",
+	"/tmp/stuff",  # nosec B108
 	"/usr/local/bin",
 ])
 def test_glob_outside_path_passthrough(path: str) -> None:
@@ -572,7 +571,7 @@ def test_glob_outside_path_passthrough(path: str) -> None:
 	"/etc/secrets",
 	"/home/other/project",
 	"/var/log",
-	"/tmp",
+	"/tmp",  # nosec B108
 	"/",
 ])
 def test_grep_outside_path_passthrough(path: str) -> None:
@@ -633,7 +632,7 @@ def test_read_allowed_paths(file_path: str) -> None:
 	f"{ALLOWED_PATH}/../secrets.txt",
 	"/home/user/../../../etc/shadow",
 	"../../etc/passwd",
-	"/tmp/../etc/passwd",
+	"/tmp/../etc/passwd",  # nosec B108
 	f"{ALLOWED_PATH}/test/../../outside",
 	f"{ALLOWED_PATH}/a/../../../root/.ssh/id_rsa",
 ])
@@ -652,7 +651,7 @@ def test_read_path_traversal_denied(file_path: str) -> None:
 	f"{ALLOWED_PATH}/test/.env",
 	f"{ALLOWED_PATH}/test/config.secret",
 	"/home/user/.env",
-	"/tmp/.env",
+	"/tmp/.env",  # nosec B108
 	"/opt/app/.env",
 	"/anywhere/credentials.secret",
 	".env",
@@ -764,7 +763,7 @@ def test_write_allowed_paths(file_path: str) -> None:
 @pytest.mark.parametrize("file_path", [
 	"/etc/passwd",
 	"/etc/hosts",
-	"/tmp/outside.txt",
+	"/tmp/outside.txt",  # nosec B108
 	"/home/other/file.txt",
 	"/root/.bashrc",
 ])
@@ -1531,7 +1530,7 @@ def test_rm_substring_not_false_positive(command: str) -> None:
 	# Traversal at different positions
 	"../../etc/passwd",
 	"../../../etc/shadow",
-	"/tmp/../etc/passwd",
+	"/tmp/../etc/passwd",  # nosec B108
 	"/var/../etc/shadow",
 	# Traversal after allowed path
 	"/Users/korny/Dropbox/prj/../../outside/secret",
@@ -1737,7 +1736,7 @@ def test_evasion_write_edit_traversal_passthrough(tool: str, file_path: str) -> 
 #============================================
 def test_passthrough_log_written() -> None:
 	"""Passthrough decisions should be logged to the passthrough log file."""
-	log_file = "/tmp/claude-test-passthrough.json"
+	log_file = "/tmp/claude-test-passthrough.json"  # nosec B108
 	# Remove old log if it exists
 	if os.path.exists(log_file):
 		os.remove(log_file)
@@ -1767,7 +1766,7 @@ def test_passthrough_log_written() -> None:
 #============================================
 def test_passthrough_log_not_written_for_allow() -> None:
 	"""Allow decisions should NOT be written to the passthrough log."""
-	log_file = "/tmp/claude-test-passthrough.json"
+	log_file = "/tmp/claude-test-passthrough.json"  # nosec B108
 	if os.path.exists(log_file):
 		os.remove(log_file)
 
@@ -1785,7 +1784,7 @@ def test_passthrough_log_not_written_for_allow() -> None:
 #============================================
 def test_passthrough_log_not_written_for_deny() -> None:
 	"""Deny decisions should NOT be written to the passthrough log."""
-	log_file = "/tmp/claude-test-passthrough.json"
+	log_file = "/tmp/claude-test-passthrough.json"  # nosec B108
 	if os.path.exists(log_file):
 		os.remove(log_file)
 
