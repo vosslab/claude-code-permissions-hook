@@ -13,9 +13,26 @@
     need for special `bash -lc` wrapper regex rules in the config
   - Added 8 unit tests: double/single quotes, compound inner commands, `-cl` flag
     order, dangerous inner commands, `-n` without `-c`, non-bash commands
-- Added `touch` to SAFE_CMDS in production config
+- Added `touch`, `cd`, `file` to SAFE_CMDS in production config
 - Fixed production config `bash -lc` rules to accept single quotes (`[\"']`
   instead of `\"` only)
+- Removed 5 redundant allow rules from production config (24 -> 19 rules)
+  - `bash -lc "source && python/pytest"` wrapper rule (decomposer unwraps bash -c)
+  - `source && python/pytest` compound rule (decomposer splits &&)
+  - Comment blocks rule (parser ignores comments, leaf commands match SAFE_CMDS)
+  - `sleep && safe` compound rule (decomposer splits &&)
+  - `bash -[lcn]+ "safe_cmd"` wrapper rule (decomposer unwraps bash -c)
+- Simplified python rule exclude regex (removed `&&`/`;`/`|` exclusions since
+  the decomposer splits compound operators before rules see them)
+- Fixed git allowlist regex: `\s` -> `(\s|$)` so bare `git status`, `git diff`,
+  `git log` (without args) now match
+- Updated [example.toml](../example.toml) to match production config patterns
+  - 5 deny rules (rm, .env/.secret, git commit/stash/rm)
+  - 17 allow rules (python, cargo, git, bash scripts, SAFE_CMDS, Glob/Grep,
+    Read/Write/Edit, /tmp, web tools, Task)
+  - Variables (SAFE_CMDS, NO_CMD_SUB, PROJECT_PATH, NO_TRAVERSAL)
+  - Decomposer explanation comment, fixed git regex
+- Rewrote [README.md](../README.md) to be concise with links to docs/
 - Created [docs/INSTALL.md](INSTALL.md) with requirements, build steps, Claude Code
   hook setup, and verify command
 - Created [docs/USAGE.md](USAGE.md) with CLI reference, input/output format,

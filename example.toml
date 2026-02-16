@@ -9,58 +9,162 @@ audit_level = "matched"
 # Review this file to identify rule gaps and tighten your config.
 passthrough_log_file = "/tmp/claude-passthrough.json"
 
-# Reusable variables - reference as ${VAR_NAME} in regex fields.
+# --- Reusable variables (referenced as ${VAR_NAME} in regex fields) ---
 # Standard env vars like $HOME expand automatically in values.
-[variables]
-SAFE_CMDS = "cat|echo|grep|head|ls|sort|tail|wc"
-NO_CMD_SUB = "`|\\$\\("
-HOME_PATH = "^$HOME/projects/"
 
-# Deny rules - checked first (take precedence)
+[variables]
+SAFE_CMDS = "awk|basename|cat|cd|chmod|comm|cp|cut|date|diff|dirname|echo|env|export|file|find|for|grep|head|ls|mkdir|printf|realpath|rg|sed|shuf|sleep|sort|source|tail|tee|test|touch|tr|uniq|wc|which|xargs"
+# Block command substitution (backtick and $(...))
+NO_CMD_SUB = "`|\\$\\("
+# Allowed project path - customize to your workspace
+PROJECT_PATH = "^$HOME/projects/"
+# Path traversal exclusion
+NO_TRAVERSAL = "\\.\\."
+
+# --- DENY rules (checked first, take precedence over allow) ---
+
+# Deny rm - uses \b word boundary to catch rm anywhere in a command,
+# including inside compound commands like "echo ok && rm file".
 [[deny]]
 tool = "Bash"
-command_regex = "^rm .*-rf"
+command_regex = "\\brm\\b"
 
+# Deny sensitive file reads
 [[deny]]
 tool = "Read"
 file_path_regex = "\\.(env|secret)$"
 
+# Deny git commit - uses \b word boundaries to catch git with any
+# flags between git and commit (e.g. "git --no-pager commit",
+# "git -C /tmp commit").
 [[deny]]
-tool = "Read"
-file_path_regex = ".*\\.\\./.*"
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\bcommit\\b"
 
-# Allow rules - checked after deny rules
-[[allow]]
-tool = "Read"
-file_path_regex = "${HOME_PATH}"
-file_path_exclude_regex = "\\.\\."
+# Deny git stash
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\bstash\\b"
 
-[[allow]]
-tool = "Write"
-file_path_regex = "${HOME_PATH}"
-file_path_exclude_regex = "\\.\\."
+# Deny git rm
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\brm\\b"
 
-[[allow]]
-tool = "Edit"
-file_path_regex = "${HOME_PATH}"
-file_path_exclude_regex = "\\.\\."
+# --- ALLOW rules ---
+# The shell command decomposer (brush-parser) splits compound commands
+# (&&, ||, ;, pipes, loops) and unwraps bash -c "..." patterns into
+# leaf sub-commands.  Each leaf is checked independently against these
+# rules, so simple per-command rules are sufficient.
+
+# -------------------------------------------------------------------
+# Bash: python tooling
+# -------------------------------------------------------------------
 
 [[allow]]
 tool = "Bash"
-command_regex = "^cargo (build|test|check|clippy|fmt|run)"
+command_regex = "^(python3?|PYTHONPATH=)\\s?"
 command_exclude_regex = "${NO_CMD_SUB}"
+
+[[allow]]
+tool = "Bash"
+command_regex = "^(pytest|pyflakes)\\s"
+
+# -------------------------------------------------------------------
+# Bash: cargo commands (exclude destructive subcommands)
+# -------------------------------------------------------------------
+
+[[allow]]
+tool = "Bash"
+command_regex = "^cargo\\b"
+command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: git allowlist (read-only + staging)
+# -------------------------------------------------------------------
+
+[[allow]]
+tool = "Bash"
+command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|checkout|diff|log|mv|pull|restore|show|status)(\\s|$)"
+
+# -------------------------------------------------------------------
+# Bash: run a shell script directly (with optional -n syntax check)
+# -------------------------------------------------------------------
+
+[[allow]]
+tool = "Bash"
+command_regex = "^bash\\s+(-n\\s+)?[A-Za-z0-9_./-]+\\.sh\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: common shell utilities
+# -------------------------------------------------------------------
 
 [[allow]]
 tool = "Bash"
 command_regex = "^(${SAFE_CMDS})\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
+# -------------------------------------------------------------------
+# Glob/Grep: search tools
+# -------------------------------------------------------------------
+
 [[allow]]
-tool = "Task"
-subagent_type = "codebase-analyzer"
+tool = "Glob"
+path_regex = "${PROJECT_PATH}"
+path_exclude_regex = "${NO_TRAVERSAL}"
+
+[[allow]]
+tool = "Grep"
+path_regex = "${PROJECT_PATH}"
+path_exclude_regex = "${NO_TRAVERSAL}"
+
+# -------------------------------------------------------------------
+# Read/Write/Edit: filesystem access
+# -------------------------------------------------------------------
+
+[[allow]]
+tool = "Read"
+file_path_regex = "${PROJECT_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+[[allow]]
+tool = "Write"
+file_path_regex = "${PROJECT_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+[[allow]]
+tool = "Edit"
+file_path_regex = "${PROJECT_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+# /tmp access for scratch files
+[[allow]]
+tool = "Read"
+file_path_regex = "^/tmp/"
+
+[[allow]]
+tool = "Write"
+file_path_regex = "^/tmp/"
+
+[[allow]]
+tool = "Edit"
+file_path_regex = "^/tmp/"
+
+# -------------------------------------------------------------------
+# Web tools
+# -------------------------------------------------------------------
 
 [[allow]]
 tool = "WebFetch"
 
 [[allow]]
 tool = "WebSearch"
+
+# -------------------------------------------------------------------
+# Task/subagent tools
+# -------------------------------------------------------------------
+
+[[allow]]
+tool = "Task"
+subagent_type_regex = "^(Explore|general-purpose)$"
