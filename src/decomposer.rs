@@ -92,6 +92,13 @@ fn extract_from_pipeline(pipeline: &ast::Pipeline) -> Vec<String> {
 fn extract_from_command(cmd: &ast::Command) -> Vec<String> {
     match cmd {
         ast::Command::Simple(simple) => {
+            // Unwrap bash -c "inner command" patterns and recursively
+            // decompose the inner command string.  This lets normal
+            // allow/deny rules match the inner commands directly
+            // without needing special bash-wrapper regex rules.
+            if let Some(inner) = try_unwrap_bash_c(simple) {
+                return decompose_command(&inner);
+            }
             let s = simple_command_to_string(simple);
             if s.is_empty() {
                 vec![]
@@ -105,6 +112,50 @@ fn extract_from_command(cmd: &ast::Command) -> Vec<String> {
         ast::Command::Function(_) => vec![],
         ast::Command::ExtendedTest(_) => vec![],
     }
+}
+
+/// Detect `bash -c "inner command"` patterns and extract the inner
+/// command string.  Handles combined flags like `-lc`, `-cl`, `-c`,
+/// as well as separate flags like `-l -c`.
+fn try_unwrap_bash_c(cmd: &ast::SimpleCommand) -> Option<String> {
+    let name = cmd.word_or_name.as_ref()?;
+    let name_val = name.value.as_str();
+    if !matches!(name_val, "bash" | "/bin/bash" | "/usr/bin/bash" | "/usr/local/bin/bash") {
+        return None;
+    }
+
+    let suffix = cmd.suffix.as_ref()?;
+    let mut found_c = false;
+
+    for item in &suffix.0 {
+        if let ast::CommandPrefixOrSuffixItem::Word(w) = item {
+            if !found_c {
+                // Look for a flag containing 'c' (e.g. -c, -lc, -cl)
+                if w.value.starts_with('-') && w.value[1..].contains('c') {
+                    found_c = true;
+                }
+            } else {
+                // First word after the -c flag is the inner command
+                let inner = strip_outer_quotes(&w.value);
+                trace!("Unwrapped bash -c inner command: {:?}", inner);
+                return Some(inner);
+            }
+        }
+    }
+    None
+}
+
+/// Strip a single layer of matching outer quotes if present.
+fn strip_outer_quotes(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.len() >= 2 {
+        let first = trimmed.as_bytes()[0];
+        let last = trimmed.as_bytes()[trimmed.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return trimmed[1..trimmed.len() - 1].to_string();
+        }
+    }
+    trimmed.to_string()
 }
 
 fn extract_from_compound_command(cmd: &ast::CompoundCommand) -> Vec<String> {
@@ -291,5 +342,60 @@ mod tests {
         let result = decompose_command("if test -f file; then echo yes; fi");
         assert!(result.contains(&"test -f file".to_string()));
         assert!(result.contains(&"echo yes".to_string()));
+    }
+
+    // ---------------------------------------------------------------
+    // bash -c unwrapping tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_bash_c_double_quotes() {
+        let result = decompose_command("bash -c \"echo hello\"");
+        assert_eq!(result, vec!["echo hello"]);
+    }
+
+    #[test]
+    fn test_bash_c_single_quotes() {
+        let result = decompose_command("bash -c 'echo hello'");
+        assert_eq!(result, vec!["echo hello"]);
+    }
+
+    #[test]
+    fn test_bash_lc_with_compound() {
+        let result = decompose_command("bash -lc 'source env.sh && python3 -m pytest tests/'");
+        assert_eq!(result, vec!["source env.sh", "python3 -m pytest tests/"]);
+    }
+
+    #[test]
+    fn test_bash_lc_double_quotes_compound() {
+        let result = decompose_command("bash -lc \"echo hi && echo bye\"");
+        assert_eq!(result, vec!["echo hi", "echo bye"]);
+    }
+
+    #[test]
+    fn test_bash_cl_flag_order() {
+        let result = decompose_command("bash -cl 'ls -la'");
+        assert_eq!(result, vec!["ls -la"]);
+    }
+
+    #[test]
+    fn test_bash_c_dangerous_inner() {
+        // Decomposer unwraps, deny rule would catch rm separately
+        let result = decompose_command("bash -c 'echo ok && rm -rf /'");
+        assert_eq!(result, vec!["echo ok", "rm -rf /"]);
+    }
+
+    #[test]
+    fn test_bash_n_no_unwrap() {
+        // bash -n (syntax check) has no -c flag, should not unwrap
+        let result = decompose_command("bash -n script.sh");
+        assert_eq!(result, vec!["bash -n script.sh"]);
+    }
+
+    #[test]
+    fn test_not_bash_no_unwrap() {
+        // zsh -c should not be unwrapped (only bash)
+        let result = decompose_command("zsh -c 'echo hello'");
+        assert_eq!(result, vec!["zsh -c 'echo hello'"]);
     }
 }

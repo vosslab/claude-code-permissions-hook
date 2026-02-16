@@ -2,10 +2,31 @@
 
 ## 2026-02-16
 
+- Added `bash -c` unwrapping to `src/decomposer.rs`
+  - `try_unwrap_bash_c()` detects `bash -c "inner command"` patterns (including
+    `-lc`, `-cl`, and other combined flags) and recursively decomposes the inner
+    command string
+  - `strip_outer_quotes()` helper removes a single layer of matching quotes
+  - Handles both single and double quotes: `bash -lc "..."` and `bash -lc '...'`
+  - Only unwraps `bash` (not `zsh`, `sh`, etc.) and only when `-c` flag is present
+  - Inner commands are checked against normal allow/deny rules, eliminating the
+    need for special `bash -lc` wrapper regex rules in the config
+  - Added 8 unit tests: double/single quotes, compound inner commands, `-cl` flag
+    order, dangerous inner commands, `-n` without `-c`, non-bash commands
+- Added `touch` to SAFE_CMDS in production config
+- Fixed production config `bash -lc` rules to accept single quotes (`[\"']`
+  instead of `\"` only)
 - Created [docs/INSTALL.md](INSTALL.md) with requirements, build steps, Claude Code
   hook setup, and verify command
 - Created [docs/USAGE.md](USAGE.md) with CLI reference, input/output format,
   examples, audit file descriptions, and test commands
+- Removed shebang from `tests/test_hook.py` (pytest-only file, not executable)
+- Added `# nosec B108` security annotations to 10 test data lines in
+  `tests/test_hook.py` with hardcoded `/tmp` paths (false positives, not actual temp usage)
+- Created [pip_requirements-dev.txt](../pip_requirements-dev.txt) with dev dependencies
+  (bandit, packaging, pyflakes, pytest, rich)
+- Updated `tests/test_shebangs.py` to allowlist `tests/test_hook.py` as a
+  non-executable pytest module
 - Added passthrough logging to `src/auditing.rs`
   - New `audit_passthrough()` function writes JSON-lines entries to a dedicated file
   - Entry format: `{ timestamp, session_id, tool_name, tool_input, cwd }` (no decision/reason)
@@ -134,3 +155,45 @@
     `rm -r dir/`, `rm -f file` (only caught combined -rf flags)
   - New patterns use `\\b` word boundaries: `\\bgit\\b.*\\bcommit\\b`,
     `\\bgit\\b.*\\bstash\\b`, `\\brm\\b`
+- Copied shared repo docs and test infrastructure from central repo
+  - Added [AGENTS.md](../AGENTS.md), [CLAUDE.md](../CLAUDE.md), [source_me.sh](../source_me.sh)
+  - Added [docs/REPO_STYLE.md](REPO_STYLE.md), [docs/PYTHON_STYLE.md](PYTHON_STYLE.md),
+    [docs/MARKDOWN_STYLE.md](MARKDOWN_STYLE.md), [docs/AUTHORS.md](AUTHORS.md)
+  - Added shared test harnesses: `tests/test_shebangs.py`, `tests/test_bandit_security.py`,
+    `tests/test_pyflakes_code_lint.py`, `tests/test_ascii_compliance.py`,
+    `tests/test_whitespace.py`, `tests/test_indentation.py`,
+    `tests/test_import_requirements.py`, `tests/test_import_star.py`
+  - Added `tests/git_file_utils.py` and `.gitignore`
+
+## 2025-12-06
+
+- Created [docs/configuration-guide.md](configuration-guide.md) with rule syntax
+  for each supported tool (Read, Write, Edit, Bash, Task, Glob, Grep, WebFetch, WebSearch)
+- Created [docs/tool-input-schemas.md](tool-input-schemas.md) with Claude Code
+  tool input JSON reference
+- Cleaned up [README.md](../README.md), moved detailed docs to `docs/`
+- Truncated audit log string fields at 256 characters to keep JSON-lines manageable
+
+## 2025-12-05
+
+- Renamed logging module from `src/logging.rs` to `src/auditing.rs` to avoid
+  conflict with `log` crate naming
+- Added audit level support: `off`, `matched` (default), `all`
+- Added integration test suite in `tests/integration_test.rs` with sample JSON fixtures
+- Created `tests/test_config.toml` for integration testing
+- Truncated long tool input strings in audit entries
+- Cleaned up spurious `Decision` type duplication
+
+## 2025-10-10
+
+- Initial project release
+- Core permission hook: reads JSON from stdin, evaluates deny/allow rules, outputs
+  decision to stdout
+- TOML config with `[[deny]]` and `[[allow]]` rule sections
+- Regex pattern matching for Bash `command`, file path tools (`file_path`), and
+  Task `subagent_type`
+- Exclude regex support (`command_exclude_regex`, `file_path_exclude_regex`)
+- JSON-lines audit logging with file locking
+- CLI with `run` and `validate` subcommands via `clap`
+- [example.toml](../example.toml) with starter rules
+- [README.md](../README.md) with setup instructions and flowchart
