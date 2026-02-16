@@ -52,6 +52,26 @@ impl HookInput {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
+
+    /// Create a copy of this input with only the "command" field replaced.
+    ///
+    /// Used by the decomposer to create synthetic inputs for each
+    /// sub-command extracted from a compound Bash command.
+    pub fn with_command(&self, command: &str) -> Self {
+        let mut tool_input = serde_json::Map::new();
+        tool_input.insert(
+            "command".to_string(),
+            serde_json::Value::String(command.to_string()),
+        );
+        HookInput {
+            session_id: self.session_id.clone(),
+            transcript_path: self.transcript_path.clone(),
+            cwd: self.cwd.clone(),
+            hook_event_name: self.hook_event_name.clone(),
+            tool_name: self.tool_name.clone(),
+            tool_input: serde_json::Value::Object(tool_input),
+        }
+    }
 }
 
 impl HookOutput {

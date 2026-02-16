@@ -1,0 +1,11 @@
+{
+  "session_id": "test-session-207",
+  "transcript_path": "/tmp/transcript.jsonl",
+  "cwd": "/Users/korny/Dropbox/prj/test",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Glob",
+  "tool_input": {
+    "path": "/Users/korny/Dropbox/prj/test",
+    "pattern": "*.rs"
+  }
+}

@@ -4,6 +4,11 @@
 [audit]
 audit_file = "/tmp/claude-test-audit.json"
 audit_level = "off"
+passthrough_log_file = "/tmp/claude-test-passthrough.json"
+
+[variables]
+SAFE_CMDS = "awk|basename|cat|chmod|colordiff|comm|cp|cut|date|diff|dirname|done|echo|env|export|find|for|grep|head|ls|mkdir|printf|realpath|rg|sed|shuf|sleep|sort|source|tail|tee|test|tr|uniq|wc|which|xargs"
+NO_CMD_SUB = "`|\\$\\("
 
 # Deny rules - checked first (take precedence)
 
@@ -12,20 +17,31 @@ audit_level = "off"
 tool = "Read"
 file_path_regex = ".*\\.\\./.*"
 
-# Deny shell injection patterns in Bash (catches &&, |, ;, $() etc.)
+# Deny rm commands anywhere in a command string
 [[deny]]
 tool = "Bash"
-command_regex = ".*(&|;|\\||`|\\$\\().*"
-
-# Deny dangerous rm commands
-[[deny]]
-tool = "Bash"
-command_regex = "^rm .*-rf"
+command_regex = "\\brm\\b"
 
 # Deny sensitive file reads
 [[deny]]
 tool = "Read"
 file_path_regex = "\\.(env|secret)$"
+
+# Deny git commit - use \b word boundaries so flags between git and commit
+# are caught (e.g. "git --no-pager commit", "git -C /tmp commit")
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\bcommit\\b"
+
+# Deny git stash - same pattern
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\bstash\\b"
+
+# Deny git rm - catches "git rm file" and "git -C /path rm file"
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\brm\\b"
 
 # Allow rules - checked after deny rules
 
@@ -35,13 +51,48 @@ tool = "Read"
 file_path_regex = "^/Users/korny/Dropbox/prj/.*"
 file_path_exclude_regex = "\\.\\."
 
+# Allow writes within the Dropbox project directory
+[[allow]]
+tool = "Write"
+file_path_regex = "^/Users/korny/Dropbox/prj/.*"
+file_path_exclude_regex = "\\.\\."
+
+# Allow edits within the Dropbox project directory
+[[allow]]
+tool = "Edit"
+file_path_regex = "^/Users/korny/Dropbox/prj/.*"
+file_path_exclude_regex = "\\.\\."
+
+# Allow Glob within the Dropbox project directory
+[[allow]]
+tool = "Glob"
+file_path_regex = "^/Users/korny/Dropbox/prj/"
+
+# Allow Grep within the Dropbox project directory
+[[allow]]
+tool = "Grep"
+file_path_regex = "^/Users/korny/Dropbox/prj/"
+
 # Allow safe cargo commands
 [[allow]]
 tool = "Bash"
 command_regex = "^cargo (build|test|check|clippy|fmt|run)"
-command_exclude_regex = "&|;|\\||`|\\$\\("
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow common shell utilities (narrow exclude: blocks command substitution only)
+[[allow]]
+tool = "Bash"
+command_regex = "^(${SAFE_CMDS})\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
 
 # Allow specific subagent types
 [[allow]]
 tool = "Task"
 subagent_type = "codebase-analyzer"
+
+# Tool-only rules (match any input for the tool)
+[[allow]]
+tool = "WebFetch"
+
+[[allow]]
+tool = "WebSearch"

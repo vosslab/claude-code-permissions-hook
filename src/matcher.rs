@@ -29,9 +29,27 @@ pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<String> {
     None
 }
 
+/// Check if a rule is tool-only (no regex or subagent fields set).
+/// Such rules match any input for the given tool name.
+fn is_tool_only_rule(rule: &Rule) -> bool {
+    rule.file_path_regex.is_none()
+        && rule.file_path_exclude_regex.is_none()
+        && rule.command_regex.is_none()
+        && rule.command_exclude_regex.is_none()
+        && rule.subagent_type.is_none()
+        && rule.subagent_type_exclude_regex.is_none()
+        && rule.prompt_regex.is_none()
+        && rule.prompt_exclude_regex.is_none()
+}
+
 fn check_rule(rule: &Rule, input: &HookInput) -> Option<String> {
+    // Tool-only rules (e.g. [[allow]] tool = "WebFetch") match any input for that tool
+    if is_tool_only_rule(rule) {
+        return Some(format!("Matched tool-only rule for {}", input.tool_name));
+    }
+
     match input.tool_name.as_str() {
-        "Read" | "Write" | "Edit" | "Glob" => {
+        "Read" | "Write" | "Edit" => {
             if let Some(file_path) = input.extract_field("file_path")
                 && check_field_with_exclude(
                     &file_path,
@@ -42,6 +60,21 @@ fn check_rule(rule: &Rule, input: &HookInput) -> Option<String> {
                 return Some(format!(
                     "Matched rule for {} with file_path: {}",
                     input.tool_name, file_path
+                ));
+            }
+        }
+        "Glob" | "Grep" => {
+            // Glob and Grep use "path" field, not "file_path"
+            if let Some(path) = input.extract_field("path")
+                && check_field_with_exclude(
+                    &path,
+                    &rule.file_path_regex,
+                    &rule.file_path_exclude_regex,
+                )
+            {
+                return Some(format!(
+                    "Matched rule for {} with path: {}",
+                    input.tool_name, path
                 ));
             }
         }
@@ -151,6 +184,116 @@ mod tests {
             &main_regex,
             &exclude_regex
         ));
+    }
+
+    #[test]
+    fn test_is_tool_only_rule() {
+        let tool_only = Rule {
+            tool: "WebFetch".to_string(),
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+        };
+        assert!(is_tool_only_rule(&tool_only));
+    }
+
+    #[test]
+    fn test_tool_only_with_regex_not_tool_only() {
+        let with_regex = Rule {
+            tool: "Bash".to_string(),
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: Some(Regex::new(r"^cargo").unwrap()),
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+        };
+        assert!(!is_tool_only_rule(&with_regex));
+    }
+
+    #[test]
+    fn test_tool_only_rule_matches() {
+        let rule = Rule {
+            tool: "WebFetch".to_string(),
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "WebFetch".to_string(),
+            tool_input: serde_json::json!({"url": "https://example.com"}),
+        };
+        let result = check_rule(&rule, &input);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("tool-only"));
+    }
+
+    #[test]
+    fn test_glob_uses_path_field() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"path": "/home/user/project", "pattern": "*.rs"}),
+        };
+        let result = check_rule(&rule, &input);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("path:"));
+    }
+
+    #[test]
+    fn test_grep_uses_path_field() {
+        let rule = Rule {
+            tool: "Grep".to_string(),
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Grep".to_string(),
+            tool_input: serde_json::json!({"path": "/home/user/project", "pattern": "fn main"}),
+        };
+        let result = check_rule(&rule, &input);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("path:"));
     }
 
     #[test]

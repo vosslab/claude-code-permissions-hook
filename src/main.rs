@@ -10,9 +10,9 @@ use env_logger::Env;
 use log::info;
 use std::path::PathBuf;
 
-use claude_code_permissions_hook::auditing::audit_tool_use;
+use claude_code_permissions_hook::auditing::{audit_passthrough, audit_tool_use};
 use claude_code_permissions_hook::{
-    Decision, HookInput, HookOutput, load_config, process_hook_input_with_config, validate_config,
+    Decision, HookInput, HookOutput, load_config, process_hook_input_with_rules, validate_config,
 };
 
 #[derive(Debug, Parser)]
@@ -42,7 +42,8 @@ fn run_hook(config_path: PathBuf) -> Result<()> {
 
     let input = HookInput::read_from_stdin().context("Failed to read hook input")?;
 
-    let result = process_hook_input_with_config(&config, &input)?;
+    // Use pre-compiled rules to avoid recompiling regex on every call
+    let result = process_hook_input_with_rules(&deny_rules, &allow_rules, &input);
 
     // Audit the decision
     audit_tool_use(
@@ -52,6 +53,13 @@ fn run_hook(config_path: PathBuf) -> Result<()> {
         result.decision,
         result.reason.as_deref(),
     );
+
+    // Log passthrough decisions to dedicated file when configured
+    if result.decision == Decision::Passthrough {
+        if let Some(ref pt_path) = config.audit.passthrough_log_file {
+            audit_passthrough(pt_path, &input);
+        }
+    }
 
     // Output decision to stdout (passthrough = no output)
     match result.decision {
@@ -67,9 +75,6 @@ fn run_hook(config_path: PathBuf) -> Result<()> {
             // No output for passthrough
         }
     }
-
-    // Suppress unused variable warning - rules are used for config validation
-    let _ = (deny_rules, allow_rules);
 
     Ok(())
 }

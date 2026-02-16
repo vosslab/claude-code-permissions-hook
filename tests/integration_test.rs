@@ -140,6 +140,244 @@ fn test_validate_test_config() {
     assert!(allow_count > 0, "Test config should have allow rules");
 }
 
+// --- Decomposer integration tests ---
+
+#[test]
+fn test_decomposer_safe_compound_allowed() {
+    // echo hi && echo bye: both sub-commands are safe utilities
+    let input = HookInput {
+        session_id: "test".to_string(),
+        transcript_path: "/tmp/test".to_string(),
+        cwd: "/home/user".to_string(),
+        hook_event_name: "PreToolUse".to_string(),
+        tool_name: "Bash".to_string(),
+        tool_input: serde_json::json!({"command": "echo hi && echo bye"}),
+    };
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+    assert_eq!(result.decision, Decision::Allow, "Safe compound should be allowed");
+}
+
+#[test]
+fn test_decomposer_dangerous_sub_command_denied() {
+    // echo ok && rm file: rm sub-command triggers deny
+    let input = HookInput {
+        session_id: "test".to_string(),
+        transcript_path: "/tmp/test".to_string(),
+        cwd: "/home/user".to_string(),
+        hook_event_name: "PreToolUse".to_string(),
+        tool_name: "Bash".to_string(),
+        tool_input: serde_json::json!({"command": "echo ok && rm -rf /tmp"}),
+    };
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+    assert_eq!(result.decision, Decision::Deny, "rm in compound should be denied");
+}
+
+#[test]
+fn test_decomposer_mixed_passthrough() {
+    // echo ok && python3 script: python3 is not in allow rules
+    let input = HookInput {
+        session_id: "test".to_string(),
+        transcript_path: "/tmp/test".to_string(),
+        cwd: "/home/user".to_string(),
+        hook_event_name: "PreToolUse".to_string(),
+        tool_name: "Bash".to_string(),
+        tool_input: serde_json::json!({"command": "echo ok && python3 script.py"}),
+    };
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+    assert_eq!(
+        result.decision,
+        Decision::Passthrough,
+        "Mixed safe + unknown should passthrough"
+    );
+}
+
+#[test]
+fn test_decomposer_for_loop_safe_body() {
+    // for loop with safe body commands
+    let input = HookInput {
+        session_id: "test".to_string(),
+        transcript_path: "/tmp/test".to_string(),
+        cwd: "/home/user".to_string(),
+        hook_event_name: "PreToolUse".to_string(),
+        tool_name: "Bash".to_string(),
+        tool_input: serde_json::json!({"command": "for f in *.py; do echo $f; done"}),
+    };
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+    assert_eq!(
+        result.decision,
+        Decision::Allow,
+        "For loop with safe body should be allowed"
+    );
+}
+
+#[test]
+fn test_decomposer_for_loop_dangerous_body() {
+    // for loop with rm in body
+    let input = HookInput {
+        session_id: "test".to_string(),
+        transcript_path: "/tmp/test".to_string(),
+        cwd: "/home/user".to_string(),
+        hook_event_name: "PreToolUse".to_string(),
+        tool_name: "Bash".to_string(),
+        tool_input: serde_json::json!({"command": "for f in *.tmp; do rm $f; done"}),
+    };
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+    assert_eq!(
+        result.decision,
+        Decision::Deny,
+        "For loop with rm in body should be denied"
+    );
+}
+
+// --- New fixture tests for compound commands, tool-only, Glob/Grep, Edit ---
+
+#[test]
+fn test_bash_echo_simple_allowed() {
+    let input = load_test_input("bash_echo_simple.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Allow,
+        "Simple echo should be allowed by utilities rule"
+    );
+}
+
+#[test]
+fn test_bash_compound_and_allowed() {
+    let input = load_test_input("bash_compound_and.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Allow,
+        "Safe compound command (echo && echo) should be allowed"
+    );
+}
+
+#[test]
+fn test_bash_compound_or_allowed() {
+    let input = load_test_input("bash_compound_or.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Allow,
+        "Safe compound command (echo || echo) should be allowed"
+    );
+}
+
+#[test]
+fn test_bash_rm_chained_denied() {
+    let input = load_test_input("bash_rm_chained.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Deny,
+        "Chained rm command should be denied by \\brm\\b deny rule"
+    );
+}
+
+#[test]
+fn test_bash_for_loop_allowed() {
+    let input = load_test_input("bash_for_loop.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Allow,
+        "For loop should be allowed (for is in utilities list)"
+    );
+}
+
+#[test]
+fn test_bash_while_loop_passthrough() {
+    let input = load_test_input("bash_while_loop.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Passthrough,
+        "While loop should passthrough (no matching rule)"
+    );
+}
+
+#[test]
+fn test_webfetch_tool_only_allowed() {
+    let input = load_test_input("webfetch_allowed.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Allow,
+        "WebFetch should be allowed by tool-only rule"
+    );
+    assert!(
+        result
+            .reason
+            .as_ref()
+            .unwrap()
+            .contains("tool-only"),
+        "Reason should mention tool-only: {:?}",
+        result.reason
+    );
+}
+
+#[test]
+fn test_glob_allowed_path() {
+    let input = load_test_input("glob_allowed.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Allow,
+        "Glob within allowed path should be allowed"
+    );
+    assert!(
+        result
+            .reason
+            .as_ref()
+            .unwrap()
+            .contains("path:"),
+        "Reason should mention path field: {:?}",
+        result.reason
+    );
+}
+
+#[test]
+fn test_grep_allowed_path() {
+    let input = load_test_input("grep_allowed.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Allow,
+        "Grep within allowed path should be allowed"
+    );
+    assert!(
+        result
+            .reason
+            .as_ref()
+            .unwrap()
+            .contains("path:"),
+        "Reason should mention path field: {:?}",
+        result.reason
+    );
+}
+
+#[test]
+fn test_edit_allowed_path() {
+    let input = load_test_input("edit_allowed.json");
+    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
+
+    assert_eq!(
+        result.decision,
+        Decision::Allow,
+        "Edit within allowed path should be allowed"
+    );
+}
+
 #[test]
 fn test_hook_result_constructors() {
     let allow = HookResult::allow("test reason".to_string());

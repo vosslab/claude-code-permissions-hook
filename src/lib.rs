@@ -11,6 +11,7 @@
 
 pub mod auditing;
 pub mod config;
+pub mod decomposer;
 pub mod hook_io;
 pub mod matcher;
 
@@ -70,19 +71,68 @@ pub fn process_hook_input(config_path: &Path, input: &HookInput) -> Result<HookR
 /// or for testing with custom configs.
 pub fn process_hook_input_with_config(config: &Config, input: &HookInput) -> Result<HookResult> {
     let (deny_rules, allow_rules) = config.compile_rules().context("Failed to compile rules")?;
+    Ok(process_hook_input_with_rules(&deny_rules, &allow_rules, input))
+}
 
-    // Check deny rules first
-    if let Some(reason) = check_rules(&deny_rules, input) {
-        return Ok(HookResult::deny(reason));
+/// Process a hook input against pre-compiled deny and allow rules.
+///
+/// Use this when rules are already compiled (e.g. from `load_config()`)
+/// to avoid recompiling regex patterns on every call.
+///
+/// For Bash commands, the command string is decomposed into leaf
+/// sub-commands (splitting on `&&`, `||`, `;`, pipes, loops, etc.)
+/// and each sub-command is checked independently:
+///   - Deny wins: if ANY sub-command matches a deny rule, deny the whole command.
+///   - Allow requires all: ALL sub-commands must match an allow rule.
+///   - Otherwise passthrough.
+pub fn process_hook_input_with_rules(
+    deny_rules: &[Rule],
+    allow_rules: &[Rule],
+    input: &HookInput,
+) -> HookResult {
+    // Decompose Bash commands and check each sub-command
+    if input.tool_name == "Bash" {
+        if let Some(command) = input.extract_field("command") {
+            let sub_commands = decomposer::decompose_command(&command);
+
+            // Deny check: if ANY sub-command matches ANY deny rule, deny everything
+            for sub_cmd in &sub_commands {
+                let synthetic = input.with_command(sub_cmd);
+                if let Some(reason) = check_rules(deny_rules, &synthetic) {
+                    return HookResult::deny(reason);
+                }
+            }
+
+            // Allow check: ALL sub-commands must match some allow rule
+            let mut all_reasons = Vec::new();
+            let mut all_allowed = true;
+            for sub_cmd in &sub_commands {
+                let synthetic = input.with_command(sub_cmd);
+                if let Some(reason) = check_rules(allow_rules, &synthetic) {
+                    all_reasons.push(reason);
+                } else {
+                    all_allowed = false;
+                    break;
+                }
+            }
+
+            if all_allowed && !sub_commands.is_empty() {
+                let combined = all_reasons.join("; ");
+                return HookResult::allow(combined);
+            }
+
+            return HookResult::passthrough();
+        }
     }
 
-    // Check allow rules
-    if let Some(reason) = check_rules(&allow_rules, input) {
-        return Ok(HookResult::allow(reason));
+    // Non-Bash tools: original logic
+    if let Some(reason) = check_rules(deny_rules, input) {
+        return HookResult::deny(reason);
     }
-
-    // No match - passthrough
-    Ok(HookResult::passthrough())
+    if let Some(reason) = check_rules(allow_rules, input) {
+        return HookResult::allow(reason);
+    }
+    HookResult::passthrough()
 }
 
 /// Validate a configuration file.

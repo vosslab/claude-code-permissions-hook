@@ -75,6 +75,9 @@ def read_shebang(path: str) -> str:
 		return ""
 	if not line.startswith(b"#!"):
 		return ""
+	# Rust inner attributes start with #![ and are not shebangs
+	if line.startswith(b"#!["):
+		return ""
 	try:
 		return line.decode("utf-8").rstrip("\n")
 	except UnicodeDecodeError:
