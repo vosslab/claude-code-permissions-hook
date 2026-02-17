@@ -14,7 +14,13 @@ pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<String> {
     );
 
     for (idx, rule) in rules.iter().enumerate() {
-        if rule.tool != input.tool_name {
+        // Match tool name: use tool_regex if present, otherwise exact match
+        let tool_matches = if let Some(ref regex) = rule.tool_regex {
+            regex.is_match(&input.tool_name)
+        } else {
+            rule.tool == input.tool_name
+        };
+        if !tool_matches {
             trace!("Rule {} skipped - tool mismatch", idx);
             continue;
         }
@@ -37,6 +43,7 @@ fn is_tool_only_rule(rule: &Rule) -> bool {
         && rule.command_regex.is_none()
         && rule.command_exclude_regex.is_none()
         && rule.subagent_type.is_none()
+        && rule.subagent_type_regex.is_none()
         && rule.subagent_type_exclude_regex.is_none()
         && rule.prompt_regex.is_none()
         && rule.prompt_exclude_regex.is_none()
@@ -136,6 +143,7 @@ fn check_field_with_exclude(
 }
 
 fn check_subagent_type(rule: &Rule, subagent_type: &str) -> bool {
+    // Check exact match via subagent_type field
     if let Some(ref expected_type) = rule.subagent_type {
         if expected_type != subagent_type {
             trace!(
@@ -144,19 +152,32 @@ fn check_subagent_type(rule: &Rule, subagent_type: &str) -> bool {
             );
             return false;
         }
-        if let Some(ref exclude) = rule.subagent_type_exclude_regex
-            && exclude.is_match(subagent_type)
-        {
-            debug!(
-                "Subagent type matched but EXCLUDED by exclude pattern: {}",
+    // Check regex match via subagent_type_regex field
+    } else if let Some(ref regex) = rule.subagent_type_regex {
+        if !regex.is_match(subagent_type) {
+            trace!(
+                "Subagent type didn't match regex. Got: {}",
                 subagent_type
             );
             return false;
         }
-        trace!("Subagent type matched: {}", subagent_type);
-        return true;
+    } else {
+        // No subagent_type or subagent_type_regex set
+        return false;
     }
-    false
+
+    // Check exclude pattern
+    if let Some(ref exclude) = rule.subagent_type_exclude_regex
+        && exclude.is_match(subagent_type)
+    {
+        debug!(
+            "Subagent type matched but EXCLUDED by exclude pattern: {}",
+            subagent_type
+        );
+        return false;
+    }
+    trace!("Subagent type matched: {}", subagent_type);
+    true
 }
 
 #[cfg(test)]
@@ -190,11 +211,13 @@ mod tests {
     fn test_is_tool_only_rule() {
         let tool_only = Rule {
             tool: "WebFetch".to_string(),
+            tool_regex: None,
             file_path_regex: None,
             file_path_exclude_regex: None,
             command_regex: None,
             command_exclude_regex: None,
             subagent_type: None,
+            subagent_type_regex: None,
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
@@ -206,11 +229,13 @@ mod tests {
     fn test_tool_only_with_regex_not_tool_only() {
         let with_regex = Rule {
             tool: "Bash".to_string(),
+            tool_regex: None,
             file_path_regex: None,
             file_path_exclude_regex: None,
             command_regex: Some(Regex::new(r"^cargo").unwrap()),
             command_exclude_regex: None,
             subagent_type: None,
+            subagent_type_regex: None,
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
@@ -222,11 +247,13 @@ mod tests {
     fn test_tool_only_rule_matches() {
         let rule = Rule {
             tool: "WebFetch".to_string(),
+            tool_regex: None,
             file_path_regex: None,
             file_path_exclude_regex: None,
             command_regex: None,
             command_exclude_regex: None,
             subagent_type: None,
+            subagent_type_regex: None,
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
@@ -248,11 +275,13 @@ mod tests {
     fn test_glob_uses_path_field() {
         let rule = Rule {
             tool: "Glob".to_string(),
+            tool_regex: None,
             file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
             file_path_exclude_regex: None,
             command_regex: None,
             command_exclude_regex: None,
             subagent_type: None,
+            subagent_type_regex: None,
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
@@ -274,11 +303,13 @@ mod tests {
     fn test_grep_uses_path_field() {
         let rule = Rule {
             tool: "Grep".to_string(),
+            tool_regex: None,
             file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
             file_path_exclude_regex: None,
             command_regex: None,
             command_exclude_regex: None,
             subagent_type: None,
+            subagent_type_regex: None,
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
@@ -300,11 +331,13 @@ mod tests {
     fn test_check_subagent_type() {
         let rule = Rule {
             tool: "Task".to_string(),
+            tool_regex: None,
             file_path_regex: None,
             file_path_exclude_regex: None,
             command_regex: None,
             command_exclude_regex: None,
             subagent_type: Some("codebase-analyzer".to_string()),
+            subagent_type_regex: None,
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,

@@ -44,13 +44,19 @@ pub struct AuditConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuleConfig {
+    /// Exact tool name match. Required unless tool_regex is set.
+    #[serde(default)]
     pub tool: String,
+    /// Regex pattern for matching tool names (alternative to exact tool match).
+    pub tool_regex: Option<String>,
     pub file_path_regex: Option<String>,
     pub file_path_exclude_regex: Option<String>,
     pub command_regex: Option<String>,
     pub command_exclude_regex: Option<String>,
     pub subagent_type: Option<String>,
+    pub subagent_type_regex: Option<String>,
     pub subagent_type_exclude_regex: Option<String>,
     pub prompt_regex: Option<String>,
     pub prompt_exclude_regex: Option<String>,
@@ -59,11 +65,13 @@ pub struct RuleConfig {
 #[derive(Debug, Clone)]
 pub struct Rule {
     pub tool: String,
+    pub tool_regex: Option<Regex>,
     pub file_path_regex: Option<Regex>,
     pub file_path_exclude_regex: Option<Regex>,
     pub command_regex: Option<Regex>,
     pub command_exclude_regex: Option<Regex>,
     pub subagent_type: Option<String>,
+    pub subagent_type_regex: Option<Regex>,
     pub subagent_type_exclude_regex: Option<Regex>,
     pub prompt_regex: Option<Regex>,
     pub prompt_exclude_regex: Option<Regex>,
@@ -192,6 +200,17 @@ fn compile_rule_with_vars(
     rule_config: &RuleConfig,
     vars: &HashMap<String, String>,
 ) -> Result<Rule> {
+    // Validate that at least one of tool or tool_regex is set
+    if rule_config.tool.is_empty() && rule_config.tool_regex.is_none() {
+        bail!("Rule must have either 'tool' or 'tool_regex' set");
+    }
+
+    // Compile tool_regex if present
+    let tool_regex = rule_config.tool_regex.as_ref()
+        .map(|s| Regex::new(s))
+        .transpose()
+        .context("Invalid tool_regex")?;
+
     // Expand variables in all regex string fields
     let fp = expand_opt(&rule_config.file_path_regex, vars)
         .context("In file_path_regex")?;
@@ -201,6 +220,8 @@ fn compile_rule_with_vars(
         .context("In command_regex")?;
     let cmd_ex = expand_opt(&rule_config.command_exclude_regex, vars)
         .context("In command_exclude_regex")?;
+    let sa = expand_opt(&rule_config.subagent_type_regex, vars)
+        .context("In subagent_type_regex")?;
     let sa_ex = expand_opt(&rule_config.subagent_type_exclude_regex, vars)
         .context("In subagent_type_exclude_regex")?;
     let pr = expand_opt(&rule_config.prompt_regex, vars)
@@ -229,6 +250,11 @@ fn compile_rule_with_vars(
         .transpose()
         .context("Invalid command_exclude_regex")?;
 
+    let subagent_type_regex = sa.as_ref()
+        .map(|s| Regex::new(s))
+        .transpose()
+        .context("Invalid subagent_type_regex")?;
+
     let subagent_type_exclude_regex = sa_ex.as_ref()
         .map(|s| Regex::new(s))
         .transpose()
@@ -246,11 +272,13 @@ fn compile_rule_with_vars(
 
     Ok(Rule {
         tool: rule_config.tool.clone(),
+        tool_regex,
         file_path_regex,
         file_path_exclude_regex,
         command_regex,
         command_exclude_regex,
         subagent_type: rule_config.subagent_type.clone(),
+        subagent_type_regex,
         subagent_type_exclude_regex,
         prompt_regex,
         prompt_exclude_regex,
@@ -266,11 +294,13 @@ mod tests {
     fn test_compile_rule() -> Result<()> {
         let rule_config = RuleConfig {
             tool: "Read".to_string(),
+            tool_regex: None,
             file_path_regex: Some(r"^/home/.*".to_string()),
             file_path_exclude_regex: Some(r"\.\.".to_string()),
             command_regex: None,
             command_exclude_regex: None,
             subagent_type: None,
+            subagent_type_regex: None,
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
@@ -322,11 +352,13 @@ mod tests {
 
         let rule_config = RuleConfig {
             tool: "Bash".to_string(),
+            tool_regex: None,
             file_path_regex: None,
             file_path_exclude_regex: None,
             command_regex: Some("^(${SAFE_CMDS})\\b".to_string()),
             command_exclude_regex: None,
             subagent_type: None,
+            subagent_type_regex: None,
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,

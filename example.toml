@@ -13,7 +13,7 @@ passthrough_log_file = "/tmp/claude-passthrough.json"
 # Standard env vars like $HOME expand automatically in values.
 
 [variables]
-SAFE_CMDS = "awk|basename|cat|cd|chmod|comm|cp|cut|date|diff|dirname|echo|env|export|file|find|for|grep|head|ls|mkdir|printf|realpath|rg|sed|shuf|sleep|sort|source|tail|tee|test|touch|tr|uniq|wc|which|xargs"
+SAFE_CMDS = "awk|basename|cat|cd|chmod|comm|cp|cut|date|diff|dirname|echo|env|export|file|find|for|grep|head|ls|lsof|mkdir|printf|realpath|rg|sed|shuf|sleep|sort|source|tail|tee|test|touch|tr|tree|uniq|wc|which|xargs"
 # Block command substitution (backtick and $(...))
 NO_CMD_SUB = "`|\\$\\("
 # Allowed project path - customize to your workspace
@@ -106,18 +106,27 @@ command_regex = "^(${SAFE_CMDS})\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
+# Bash: env-var-prefixed safe commands (e.g. LC_ALL=C grep ...)
+# -------------------------------------------------------------------
+
+[[allow]]
+tool = "Bash"
+command_regex = "^[A-Z_]+=[^ ]+\\s+(${SAFE_CMDS})\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
 # Glob/Grep: search tools
 # -------------------------------------------------------------------
 
 [[allow]]
 tool = "Glob"
-path_regex = "${PROJECT_PATH}"
-path_exclude_regex = "${NO_TRAVERSAL}"
+file_path_regex = "${PROJECT_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
 
 [[allow]]
 tool = "Grep"
-path_regex = "${PROJECT_PATH}"
-path_exclude_regex = "${NO_TRAVERSAL}"
+file_path_regex = "${PROJECT_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
 
 # -------------------------------------------------------------------
 # Read/Write/Edit: filesystem access
@@ -138,18 +147,18 @@ tool = "Edit"
 file_path_regex = "${PROJECT_PATH}"
 file_path_exclude_regex = "${NO_TRAVERSAL}"
 
-# /tmp access for scratch files
+# /tmp access for scratch files (macOS resolves /tmp to /private/tmp)
 [[allow]]
 tool = "Read"
-file_path_regex = "^/tmp/"
+file_path_regex = "^(/private)?/tmp/"
 
 [[allow]]
 tool = "Write"
-file_path_regex = "^/tmp/"
+file_path_regex = "^(/private)?/tmp/"
 
 [[allow]]
 tool = "Edit"
-file_path_regex = "^/tmp/"
+file_path_regex = "^(/private)?/tmp/"
 
 # -------------------------------------------------------------------
 # Web tools
@@ -167,4 +176,18 @@ tool = "WebSearch"
 
 [[allow]]
 tool = "Task"
-subagent_type_regex = "^(Explore|general-purpose)$"
+subagent_type_regex = "^(Explore|general-purpose|Plan|Bash|haiku|sonnet|opus|statusline-setup|claude-code-guide|superpowers:code-reviewer)$"
+
+# -------------------------------------------------------------------
+# Claude internal tools (orchestration/UI, no side effects)
+# -------------------------------------------------------------------
+
+[[allow]]
+tool_regex = "^(TaskOutput|TaskCreate|TaskList|TaskGet|TaskUpdate|TaskStop|Skill|AskUserQuestion|ExitPlanMode|EnterPlanMode|SendMessage|TeamCreate|TeamDelete|NotebookEdit)$"
+
+# -------------------------------------------------------------------
+# Playwright MCP browser tools (sandboxed browser interaction)
+# -------------------------------------------------------------------
+
+[[allow]]
+tool_regex = "^mcp__plugin_playwright_playwright__browser_"

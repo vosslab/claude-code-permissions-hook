@@ -2,6 +2,39 @@
 
 ## 2026-02-16
 
+- Bumped version to 26.02 (26.2.0 in Cargo.toml due to SemVer constraints),
+  added `VERSION` file
+- **Bug fix**: `subagent_type_regex` field in TOML was silently ignored by serde
+  because the field did not exist in `RuleConfig`. The Task allow rule in
+  `example.toml` was acting as a tool-only rule (allowing ALL subagent types)
+  instead of restricting to Explore/general-purpose.
+  - Added `subagent_type_regex: Option<String>` to `RuleConfig` and
+    `subagent_type_regex: Option<Regex>` to `Rule`
+  - Updated `check_subagent_type()` in `src/matcher.rs` to check regex match
+    as an alternative to exact `subagent_type` match
+  - Updated `is_tool_only_rule()` to include `subagent_type_regex`
+- **Bug fix**: Added `#[serde(deny_unknown_fields)]` to `RuleConfig` so that
+  typos or non-existent fields in TOML rules cause a parse error at startup
+  instead of being silently ignored
+  - Also fixed `path_regex`/`path_exclude_regex` in Glob/Grep rules (these
+    were unknown fields silently ignored) to `file_path_regex`/
+    `file_path_exclude_regex`
+- Added `tool_regex` field to `RuleConfig` and `Rule` for regex-based tool
+  name matching. Allows collapsing many tool-only rules into a single rule
+  with a pattern (e.g. `tool_regex = "^mcp__plugin_playwright_"`)
+- Added `tree` and `lsof` to SAFE_CMDS in `example.toml`
+- Added env-var-prefix Bash rule (`LC_ALL=C grep ...` pattern)
+- Fixed macOS `/private/tmp/` path matching: `/tmp/` rules now use
+  `^(/private)?/tmp/` to handle macOS symlink resolution
+- Added Claude internal tool rules via `tool_regex` (TaskOutput, TaskCreate,
+  TaskList, TaskGet, TaskUpdate, TaskStop, Skill, AskUserQuestion,
+  ExitPlanMode, EnterPlanMode, SendMessage, TeamCreate, TeamDelete,
+  NotebookEdit)
+- Added Playwright MCP browser tool rules via `tool_regex`
+  (`^mcp__plugin_playwright_playwright__browser_`)
+- Expanded Task `subagent_type_regex` to include all standard subagent types
+  (Explore, general-purpose, Plan, Bash, haiku, sonnet, opus,
+  statusline-setup, claude-code-guide, superpowers:code-reviewer)
 - Added `bash -c` unwrapping to `src/decomposer.rs`
   - `try_unwrap_bash_c()` detects `bash -c "inner command"` patterns (including
     `-lc`, `-cl`, and other combined flags) and recursively decomposes the inner

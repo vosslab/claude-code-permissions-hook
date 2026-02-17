@@ -1,0 +1,6 @@
+the claude-code-permissions-hook is a mature hook for claude, but we have been logging passthrough commands to a file, so we can make improvements if needed. Nonetheless, we occassionally need to read the passthrough commands and make an assessment. Today is one of those assessment periods.
+
+(1) read and categorize the commands found in /tmp/claude-passthrough.json; I use `jq . /tmp/claude-passthrough.json | grep command` but you may want more details
+(2) evaluate if all of the passthroughs legitimate and expected
+(3) Provide a report of the types of commands in the file, make a table of the types of commands, grouped by type
+(4) if there are commands that should outright be allowed or denied  see if we can improve our code or .toml file. /read-repo-rules /parallel-plan /dispatching-parallel-agents /subagent-driven-development
