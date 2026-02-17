@@ -4,3 +4,8 @@ the claude-code-permissions-hook is a mature hook for claude, but we have been l
 (2) evaluate if all of the passthroughs legitimate and expected
 (3) Provide a report of the types of commands in the file, make a table of the types of commands, grouped by type
 (4) if there are commands that should outright be allowed or denied  see if we can improve our code or .toml file. /read-repo-rules /parallel-plan /dispatching-parallel-agents /subagent-driven-development
+
+Please look at the passthrough commands and give a report BEFORE exploring the codebase structure. I am looking for a report on the commands BEFORE any code changes should be considered.
+
+I keep my personal .toml file in
+/Users/vosslab/.config/claude-code-permissions-hook.toml -> /Users/vosslab/nsh/junk-drawer/CODEX/claude/claude-code-permissions-hook.toml

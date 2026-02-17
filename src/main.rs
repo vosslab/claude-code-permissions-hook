@@ -7,7 +7,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use env_logger::Env;
-use log::info;
 use std::path::PathBuf;
 
 use claude_code_permissions_hook::auditing::{audit_passthrough, audit_tool_use};
@@ -84,11 +83,10 @@ fn run_validate_config(config_path: PathBuf) -> Result<()> {
 
     let config = claude_code_permissions_hook::Config::load_from_file(&config_path)?;
 
-    info!("Configuration is valid!");
-    info!("  Deny rules: {}", deny_count);
-    info!("  Allow rules: {}", allow_count);
-    info!("  Audit file: {}", config.audit.audit_file.display());
-    info!("  Audit level: {:?}", config.audit.audit_level);
+    let total = deny_count + allow_count;
+    println!("Valid: loaded {} rules ({} deny, {} allow)", total, deny_count, allow_count);
+    println!("  Audit file:  {}", config.audit.audit_file.display());
+    println!("  Audit level: {:?}", config.audit.audit_level);
 
     Ok(())
 }
