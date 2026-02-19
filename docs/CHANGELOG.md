@@ -2,6 +2,14 @@
 
 ## 2026-02-18
 
+- Created [rotate_logs.sh](../rotate_logs.sh) to rotate `/tmp/claude-tool-use.json`
+  and `/tmp/claude-passthrough.json` with numbered suffixes (`.1.json`,
+  `.2.json`, etc.), bumping existing numbered files up before moving
+- Added `rm` cache allow rule to production TOML config: matches
+  `rm` commands targeting `[Cc]ache` paths (e.g. `~/Library/Caches/`),
+  which were already excluded from the deny rule but had no allow rule
+- Added `ls-tree` to git subcommand allowlist in production TOML config
+  (read-only command, was falling through to passthrough)
 - Added optional `reason` field to TOML deny/allow rules
   - When a rule matches and has a `reason` set, that custom message is shown
     to Claude instead of the auto-generated match description
