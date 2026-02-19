@@ -8,3 +8,5 @@ $HOME/nsh/claude-code-permissions-hook/target/release/claude-code-permissions-ho
   --config ~/.config/claude-code-permissions-hook.toml
 
 echo ""
+readlink $HOME/.config/claude-code-permissions-hook.toml
+echo ""
