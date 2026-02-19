@@ -292,14 +292,15 @@ fn test_bash_for_loop_allowed() {
 }
 
 #[test]
-fn test_bash_while_loop_passthrough() {
+fn test_bash_while_loop_allowed() {
     let input = load_test_input("bash_while_loop.json");
     let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
 
+    // Both 'true' and 'sleep' are in SAFE_CMDS, so decomposed leaves are all allowed
     assert_eq!(
         result.decision,
-        Decision::Passthrough,
-        "While loop should passthrough (no matching rule)"
+        Decision::Allow,
+        "While loop with safe body should be allowed"
     );
 }
 

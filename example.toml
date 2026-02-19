@@ -9,11 +9,25 @@ audit_level = "matched"
 # Review this file to identify rule gaps and tighten your config.
 passthrough_log_file = "/tmp/claude-passthrough.json"
 
+[limits]
+# Deny Bash commands with more than this many chained sub-commands.
+# Complex chains should be broken into separate tool calls.
+# Set to 0 to disable (default).
+max_chain_length = 5
+
 # --- Reusable variables (referenced as ${VAR_NAME} in regex fields) ---
 # Standard env vars like $HOME expand automatically in values.
 
 [variables]
-SAFE_CMDS = "awk|basename|cat|cd|chmod|comm|cp|cut|date|diff|dirname|echo|env|export|file|find|for|grep|head|ls|lsof|mkdir|printf|realpath|rg|sed|shuf|sleep|sort|source|tail|tee|test|touch|tr|tree|uniq|wc|which|xargs"
+# Safe command groups (merged via inter-variable expansion)
+# File and text processing
+FILE_CMDS = "awk|cat|comm|cut|diff|expand|file|fmt|fold|grep|head|nl|od|paste|rg|sed|seq|shuf|sort|tac|tail|tee|tr|unexpand|uniq|wc|xargs"
+# Filesystem navigation and management
+FS_CMDS = "basename|cd|chmod|cp|dirname|du|df|find|ls|lsof|mkdir|mktemp|readlink|realpath|stat|touch|tree"
+# Process and system info
+SYS_CMDS = "date|echo|env|export|expr|false|for|id|nproc|numfmt|printenv|printf|pwd|sleep|source|test|timeout|true|tty|uname|which|whoami"
+# Merged safe commands (variable references expand automatically)
+SAFE_CMDS = "${FILE_CMDS}|${FS_CMDS}|${SYS_CMDS}"
 # Block command substitution (backtick and $(...))
 NO_CMD_SUB = "`|\\$\\("
 # Allowed project path - customize to your workspace
@@ -51,6 +65,12 @@ command_regex = ".*\\bgit\\b.*\\bstash\\b"
 tool = "Bash"
 command_regex = ".*\\bgit\\b.*\\brm\\b"
 
+# Example: deny with custom reason (shown to Claude when rule fires)
+# [[deny]]
+# tool = "Bash"
+# command_regex = "\\$PYTHON\\b"
+# reason = "Use 'python3' directly instead of $PYTHON variable"
+
 # --- ALLOW rules ---
 # The shell command decomposer (brush-parser) splits compound commands
 # (&&, ||, ;, pipes, loops) and unwraps bash -c "..." patterns into
@@ -85,7 +105,7 @@ command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CM
 
 [[allow]]
 tool = "Bash"
-command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|checkout|diff|log|mv|pull|restore|show|status)(\\s|$)"
+command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|checkout|diff|log|ls-files|mv|pull|restore|show|status)(\\s|$)"
 
 # -------------------------------------------------------------------
 # Bash: run a shell script directly (with optional -n syntax check)
@@ -106,12 +126,14 @@ command_regex = "^(${SAFE_CMDS})\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
-# Bash: env-var-prefixed safe commands (e.g. LC_ALL=C grep ...)
+# Bash: env-var-prefixed commands (e.g. LC_ALL=C grep ...,
+# REPO_ROOT=x PYTHONPATH=y python3 -m pytest ...)
+# Supports one or more VAR=value prefixes before the command.
 # -------------------------------------------------------------------
 
 [[allow]]
 tool = "Bash"
-command_regex = "^[A-Z_]+=[^ ]+\\s+(${SAFE_CMDS})\\b"
+command_regex = "^([A-Z_]+=[^ ]+\\s+)+(${SAFE_CMDS}|python3?|pytest|pyflakes)\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------

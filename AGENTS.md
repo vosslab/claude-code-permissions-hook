@@ -12,3 +12,6 @@ AI agents (Codex/Claude) must run Python using `source source_me.sh && python3` 
 AI agents should execute shell commands with Bash (`bash -lc`) instead of Zsh because `source_me.sh` and this repo's environment assumptions target Bash semantics.
 This is only for AI agents runtime, not a requirement for repo scripts.
 On this user's macOS (Homebrew Python 3.12), Python modules are installed to `/opt/homebrew/lib/python3.12/site-packages/`.
+
+the users official claude-code-permissions-hook.toml is in
+~/nsh/junk-drawer/CODEX/claude/claude-code-permissions-hook.toml do break any symlinks to this official file

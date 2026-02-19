@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub audit: AuditConfig,
+    /// Optional limits for command complexity.
+    #[serde(default)]
+    pub limits: LimitsConfig,
     /// Reusable string fragments for regex patterns.
     /// Reference in regex fields as `${VAR_NAME}`.
     #[serde(default)]
@@ -20,6 +23,24 @@ pub struct Config {
     pub allow: Vec<RuleConfig>,
     #[serde(default)]
     pub deny: Vec<RuleConfig>,
+}
+
+/// Limits on command complexity. Commands exceeding these are denied.
+#[derive(Debug, Deserialize, Clone)]
+pub struct LimitsConfig {
+    /// Maximum number of chained sub-commands in a single Bash invocation.
+    /// Commands with more leaf sub-commands than this are denied.
+    /// Set to 0 to disable the limit (default).
+    #[serde(default)]
+    pub max_chain_length: usize,
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self {
+            max_chain_length: 0,
+        }
+    }
 }
 
 /// Controls what gets written to the audit log file.
@@ -60,6 +81,9 @@ pub struct RuleConfig {
     pub subagent_type_exclude_regex: Option<String>,
     pub prompt_regex: Option<String>,
     pub prompt_exclude_regex: Option<String>,
+    /// Optional human-readable reason shown when this rule matches.
+    /// Overrides the auto-generated match description.
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +99,8 @@ pub struct Rule {
     pub subagent_type_exclude_regex: Option<Regex>,
     pub prompt_regex: Option<Regex>,
     pub prompt_exclude_regex: Option<Regex>,
+    /// Optional human-readable reason shown when this rule matches.
+    pub reason: Option<String>,
 }
 
 impl Config {
@@ -95,6 +121,36 @@ impl Config {
                 (k, expanded)
             })
             .collect();
+
+        // Expand inter-variable references (${VAR} inside variable values).
+        // Iterate until no more expansions occur or a cycle is detected.
+        let max_passes = config.variables.len() + 1;
+        for _ in 0..max_passes {
+            let snapshot = config.variables.clone();
+            let mut changed = false;
+            for value in config.variables.values_mut() {
+                if value.contains("${") {
+                    let expanded = expand_variables(value, &snapshot)?;
+                    if expanded != *value {
+                        *value = expanded;
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        // Check for unresolved references (circular or undefined)
+        for (key, value) in &config.variables {
+            if value.contains("${") {
+                bail!(
+                    "Unresolved variable reference in '{}': {}. Check for circular references.",
+                    key,
+                    value
+                );
+            }
+        }
 
         Ok(config)
     }
@@ -282,6 +338,7 @@ fn compile_rule_with_vars(
         subagent_type_exclude_regex,
         prompt_regex,
         prompt_exclude_regex,
+        reason: rule_config.reason.clone(),
     })
 }
 
@@ -304,6 +361,7 @@ mod tests {
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
+            reason: None,
         };
 
         let vars = HashMap::new();
@@ -362,6 +420,7 @@ mod tests {
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
+            reason: None,
         };
 
         let rule = compile_rule_with_vars(&rule_config, &vars)?;
@@ -372,6 +431,49 @@ mod tests {
         assert!(re.is_match("cat file.txt"));
         assert!(!re.is_match("rm -rf /"));
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_inter_variable_expansion() -> Result<()> {
+        // Variables that reference other variables should be expanded
+        let toml_str = r#"
+[audit]
+audit_file = "/tmp/test.json"
+
+[variables]
+FILE_CMDS = "cat|head|tail"
+SEARCH_CMDS = "grep|find|rg"
+SAFE_CMDS = "${FILE_CMDS}|${SEARCH_CMDS}|echo"
+
+[[allow]]
+tool = "Bash"
+command_regex = "^(${SAFE_CMDS})\\b"
+"#;
+        let config: Config = toml::from_str(toml_str)?;
+        // Simulate the full load pipeline (env expansion is no-op here)
+        let mut vars = config.variables;
+        let max_passes = vars.len() + 1;
+        for _ in 0..max_passes {
+            let snapshot = vars.clone();
+            let mut changed = false;
+            for value in vars.values_mut() {
+                if value.contains("${") {
+                    let expanded = expand_variables(value, &snapshot)?;
+                    if expanded != *value {
+                        *value = expanded;
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        assert_eq!(
+            vars.get("SAFE_CMDS").unwrap(),
+            "cat|head|tail|grep|find|rg|echo"
+        );
         Ok(())
     }
 }

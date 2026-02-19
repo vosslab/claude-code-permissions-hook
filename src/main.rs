@@ -42,7 +42,12 @@ fn run_hook(config_path: PathBuf) -> Result<()> {
     let input = HookInput::read_from_stdin().context("Failed to read hook input")?;
 
     // Use pre-compiled rules to avoid recompiling regex on every call
-    let result = process_hook_input_with_rules(&deny_rules, &allow_rules, &input);
+    let result = process_hook_input_with_rules(
+        &deny_rules,
+        &allow_rules,
+        config.limits.max_chain_length,
+        &input,
+    );
 
     // Audit the decision
     audit_tool_use(

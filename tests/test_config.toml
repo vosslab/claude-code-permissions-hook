@@ -7,7 +7,10 @@ audit_level = "off"
 passthrough_log_file = "/tmp/claude-test-passthrough.json"
 
 [variables]
-SAFE_CMDS = "awk|basename|cat|chmod|colordiff|comm|cp|cut|date|diff|dirname|done|echo|env|export|find|for|grep|head|ls|mkdir|printf|realpath|rg|sed|shuf|sleep|sort|source|tail|tee|test|tr|uniq|wc|which|xargs"
+FILE_CMDS = "awk|cat|colordiff|comm|cut|diff|expand|file|fmt|fold|grep|head|join|nl|od|paste|rg|sed|seq|shuf|sort|tac|tail|tee|tr|unexpand|uniq|wc|xargs"
+FS_CMDS = "basename|chmod|cp|dirname|du|df|find|ls|mkdir|mktemp|readlink|realpath|stat|touch"
+SYS_CMDS = "date|done|du|echo|env|export|expr|false|for|id|nproc|numfmt|printenv|printf|pwd|sleep|sort|source|test|timeout|true|tty|uname|which|whoami"
+SAFE_CMDS = "${FILE_CMDS}|${FS_CMDS}|${SYS_CMDS}"
 NO_CMD_SUB = "`|\\$\\("
 
 # Deny rules - checked first (take precedence)

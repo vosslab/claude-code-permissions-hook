@@ -44,8 +44,22 @@ pub fn decompose_command(command: &str) -> Vec<String> {
     if commands.is_empty() {
         return vec![command.to_string()];
     }
-    trace!("Decomposed into {} sub-commands", commands.len());
-    commands
+
+    // Extract commands from $(...) substitutions in each leaf and
+    // add them as additional leaves for rule checking.
+    let mut all_commands = Vec::new();
+    for cmd in &commands {
+        all_commands.push(cmd.clone());
+        for inner in extract_command_substitutions(cmd) {
+            // Recursively decompose the inner command (it may itself
+            // contain &&, pipes, etc.)
+            let inner_leaves = decompose_command(&inner);
+            all_commands.extend(inner_leaves);
+        }
+    }
+
+    trace!("Decomposed into {} sub-commands (with $() extraction)", all_commands.len());
+    all_commands
 }
 
 // ------------------------------------------------------------------
@@ -158,11 +172,62 @@ fn strip_outer_quotes(s: &str) -> String {
     trimmed.to_string()
 }
 
+/// Extract inner command strings from `$(...)` command substitutions.
+///
+/// Uses parenthesis-depth tracking to handle nested `$(...)`.
+/// Returns one string per top-level `$(...)` found.
+fn extract_command_substitutions(s: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len().saturating_sub(1) {
+        // Look for $( pattern
+        if bytes[i] == b'$' && bytes[i + 1] == b'(' {
+            // Track paren depth starting after $(
+            let start = i + 2;
+            let mut depth = 1;
+            let mut j = start;
+            while j < bytes.len() && depth > 0 {
+                if bytes[j] == b'(' {
+                    depth += 1;
+                } else if bytes[j] == b')' {
+                    depth -= 1;
+                }
+                if depth > 0 {
+                    j += 1;
+                }
+            }
+            // Extract inner command if we found matching close paren
+            if depth == 0 && j > start {
+                let inner = &s[start..j];
+                trace!("Extracted $() substitution: {:?}", inner);
+                results.push(inner.to_string());
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    results
+}
+
 fn extract_from_compound_command(cmd: &ast::CompoundCommand) -> Vec<String> {
     match cmd {
         ast::CompoundCommand::BraceGroup(bg) => extract_from_compound_list(&bg.list),
         ast::CompoundCommand::Subshell(sub) => extract_from_compound_list(&sub.list),
-        ast::CompoundCommand::ForClause(fc) => extract_from_compound_list(&fc.body.list),
+        ast::CompoundCommand::ForClause(fc) => {
+            let mut result = Vec::new();
+            // Extract $() from the for clause's values (e.g. "for i in $(cmd)")
+            if let Some(ref values) = fc.values {
+                for w in values {
+                    for inner in extract_command_substitutions(&w.value) {
+                        result.extend(decompose_command(&inner));
+                    }
+                }
+            }
+            result.extend(extract_from_compound_list(&fc.body.list));
+            result
+        }
         ast::CompoundCommand::WhileClause(wc) => {
             // condition is wc.0, body is wc.1
             let mut result = extract_from_compound_list(&wc.0);
@@ -397,5 +462,74 @@ mod tests {
         // zsh -c should not be unwrapped (only bash)
         let result = decompose_command("zsh -c 'echo hello'");
         assert_eq!(result, vec!["zsh -c 'echo hello'"]);
+    }
+
+    // ---------------------------------------------------------------
+    // $() command substitution extraction tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_cmd_sub_in_for_loop() {
+        // for i in $(ls *.txt); do echo $i; done
+        // The loop body "echo $i" is a leaf; "ls *.txt" is inside $() in the
+        // for clause word list which is not a SimpleCommand leaf.
+        // But the $() extractor scans leaf strings, and the for clause
+        // word list with $() gets captured via the for-loop word extraction.
+        let result = decompose_command("for i in $(ls *.txt); do echo $i; done");
+        assert!(result.contains(&"echo $i".to_string()));
+        // The $() in the for word list should be extracted
+        assert!(result.contains(&"ls *.txt".to_string()));
+    }
+
+    #[test]
+    fn test_cmd_sub_in_assignment() {
+        // VAR=$(git rev-parse --show-toplevel)
+        let result = decompose_command("REPO_ROOT=$(git rev-parse --show-toplevel)");
+        assert!(result.contains(&"git rev-parse --show-toplevel".to_string()));
+    }
+
+    #[test]
+    fn test_cmd_sub_nested() {
+        // Nested $() should extract outer content
+        let result = decompose_command("echo $(cat $(find . -name foo))");
+        assert!(result.contains(&"cat $(find . -name foo)".to_string()));
+        assert!(result.contains(&"find . -name foo".to_string()));
+    }
+
+    #[test]
+    fn test_cmd_sub_no_false_positive() {
+        // ${VAR} is NOT a command substitution, only $() is
+        let result = extract_command_substitutions("echo ${HOME}/file");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_cmd_sub_multiple() {
+        // Two $() in one command
+        let result = extract_command_substitutions("echo $(date) and $(whoami)");
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&"date".to_string()));
+        assert!(result.contains(&"whoami".to_string()));
+    }
+
+    #[test]
+    fn test_for_loop_with_basename_cmd_sub() {
+        // Real-world: for file in *.py; do name=$(basename "$file"); ... done
+        // The body has name=$(basename "$file") which contains $()
+        let result = decompose_command(
+            r#"for file in *.py; do name=$(basename "$file"); echo "$name"; done"#,
+        );
+        assert!(result.contains(&"echo \"$name\"".to_string()));
+        // basename extracted from $() inside the loop body
+        assert!(result.contains(&"basename \"$file\"".to_string()));
+    }
+
+    #[test]
+    fn test_for_loop_plain_values_no_cmd_sub() {
+        // for loop with plain values (no $()) should not produce extra leaves
+        let result = decompose_command(
+            "for locale in cs de fr; do echo $locale; done",
+        );
+        assert_eq!(result, vec!["echo $locale"]);
     }
 }

@@ -71,7 +71,12 @@ pub fn process_hook_input(config_path: &Path, input: &HookInput) -> Result<HookR
 /// or for testing with custom configs.
 pub fn process_hook_input_with_config(config: &Config, input: &HookInput) -> Result<HookResult> {
     let (deny_rules, allow_rules) = config.compile_rules().context("Failed to compile rules")?;
-    Ok(process_hook_input_with_rules(&deny_rules, &allow_rules, input))
+    Ok(process_hook_input_with_rules(
+        &deny_rules,
+        &allow_rules,
+        config.limits.max_chain_length,
+        input,
+    ))
 }
 
 /// Process a hook input against pre-compiled deny and allow rules.
@@ -82,18 +87,29 @@ pub fn process_hook_input_with_config(config: &Config, input: &HookInput) -> Res
 /// For Bash commands, the command string is decomposed into leaf
 /// sub-commands (splitting on `&&`, `||`, `;`, pipes, loops, etc.)
 /// and each sub-command is checked independently:
+///   - Chain limit: if sub-command count exceeds max_chain_length, deny.
 ///   - Deny wins: if ANY sub-command matches a deny rule, deny the whole command.
 ///   - Allow requires all: ALL sub-commands must match an allow rule.
 ///   - Otherwise passthrough.
 pub fn process_hook_input_with_rules(
     deny_rules: &[Rule],
     allow_rules: &[Rule],
+    max_chain_length: usize,
     input: &HookInput,
 ) -> HookResult {
     // Decompose Bash commands and check each sub-command
     if input.tool_name == "Bash" {
         if let Some(command) = input.extract_field("command") {
             let sub_commands = decomposer::decompose_command(&command);
+
+            // Chain length limit: deny overly complex compound commands
+            if max_chain_length > 0 && sub_commands.len() > max_chain_length {
+                return HookResult::deny(format!(
+                    "Command has {} chained sub-commands (limit: {}). Break into smaller commands.",
+                    sub_commands.len(),
+                    max_chain_length,
+                ));
+            }
 
             // Deny check: if ANY sub-command matches ANY deny rule, deny everything
             for sub_cmd in &sub_commands {

@@ -443,10 +443,10 @@ def test_for_loop_simple_allowed() -> None:
 
 
 #============================================
-def test_while_loop_passthrough() -> None:
-	"""While loop should passthrough (while is not in utilities list)."""
+def test_while_loop_allowed() -> None:
+	"""While loop with safe body (true, sleep) should be allowed."""
 	result = run_hook("Bash", {"command": "while true; do sleep 60; done"})
-	assert result["decision"] == "passthrough", f"Expected passthrough for while loop: {result}"
+	assert result["decision"] == "allow", f"Expected allow for while loop with safe body: {result}"
 
 
 #============================================
@@ -1250,9 +1250,8 @@ def test_validate_example_config() -> None:
 
 #============================================
 def test_for_loop_with_command_sub_allowed() -> None:
-	"""For loop with $() in values: decomposer extracts body sub-commands only.
-	The body is 'echo $i' which is safe. The $() in the values is not
-	a separate sub-command, so the loop is now allowed after decomposition.
+	"""For loop with $() in values: decomposer extracts body and $() contents.
+	The body 'echo $i' is safe and 'seq 10' (extracted from $()) is safe.
 	"""
 	result = run_hook("Bash", {
 		"command": "for i in $(seq 10); do echo $i; done",

@@ -1,5 +1,69 @@
 # Changelog
 
+## 2026-02-18
+
+- Added optional `reason` field to TOML deny/allow rules
+  - When a rule matches and has a `reason` set, that custom message is shown
+    to Claude instead of the auto-generated match description
+  - Added `reason: Option<String>` to `RuleConfig` and `Rule` in `src/config.rs`
+  - Updated `check_rules()` in `src/matcher.rs` to prefer custom reason
+  - Added unit tests: `test_custom_reason_overrides_auto`,
+    `test_no_custom_reason_uses_auto`
+  - Example TOML usage:
+    ```toml
+    [[deny]]
+    tool = "Bash"
+    command_regex = "\\$PYTHON\\b"
+    reason = "Use 'python3' directly instead of $PYTHON variable"
+    ```
+- Added `$(...)` command substitution extraction to the decomposer
+  - Commands inside `$(...)` are now extracted and checked against rules
+  - Works in SimpleCommand leaves (e.g. `VAR=$(cmd)`) and ForClause
+    values (e.g. `for i in $(cmd); do ...`)
+  - Recursive: inner `$(...)` in nested contexts are also extracted
+  - Added `extract_command_substitutions()` with paren-depth tracking
+  - Added ForClause value scanning in `extract_from_compound_command()`
+  - 7 new unit tests: for-loop `$()`, assignment `$()`, nested, no
+    false positive on `${}`, multiple, basename in loop body, plain values
+- Custom reason now includes the matched command: format is
+  `"<custom reason> (Matched rule for Bash with command: <actual cmd>)"`
+  instead of completely replacing the auto-generated reason
+- Added four new deny rules with custom reasons to production config
+  - `PYTHONDONTWRITEBYTECODE`/`PYTHONUNBUFFERED` usage: tells Claude to use
+    `source source_me.sh && python3` instead of setting env vars manually
+  - `VAR=$(...)` assignments: tells Claude to use `source source_me.sh` or
+    inline the command directly
+  - `$PYTHON` variable usage: denies `$PYTHON` and `${PYTHON}`, tells Claude
+    to use `python3` directly
+  - Bare env-var assignment: denies `^[A-Z_]+=[^\s]+$` (decomposed leaves
+    like `REPO_ROOT=x` with no command), tells Claude to use space-separated
+    env prefixes on one line
+- Added `[limits]` config section with `max_chain_length` setting
+  - Denies Bash commands with more chained sub-commands than the limit
+  - Set to 0 to disable (default). Production config set to 5
+  - Checked in `process_hook_input_with_rules()` after decomposition,
+    before deny/allow rule matching
+  - Added `LimitsConfig` struct to `src/config.rs` with `Default` impl
+  - Deny message: "Command has N chained sub-commands (limit: M).
+    Break into smaller commands."
+- Updated env-var-prefix Bash rule to support multiple prefixes and
+  `python3`/`pytest`/`pyflakes` commands (was only single prefix + SAFE_CMDS).
+  Fixes passthrough for `REPO_ROOT=x PYTHONPATH=y python3 -m pytest ...`
+- Added `[Cc]ache` to rm deny exclude pattern (cache files are safe to delete)
+- Added Write and Edit allow rules for `$HOME/nsh/` (project files)
+- Added Write and Edit allow rules for `$HOME/.claude/` (plan files, settings)
+- Added `ls-files` to git subcommand allowlist in [example.toml](../example.toml)
+- Added commented `reason` example to [example.toml](../example.toml)
+- Added inter-variable expansion: `${VAR}` references in variable values are
+  now resolved, allowing variables to reference other variables. Iterates until
+  stable; detects circular references. Added unit test
+  `test_inter_variable_expansion`
+- Split `SAFE_CMDS` into grouped sub-variables (`FILE_CMDS`, `FS_CMDS`,
+  `SYS_CMDS`) merged via `SAFE_CMDS = "${FILE_CMDS}|${FS_CMDS}|${SYS_CMDS}"`.
+  Applied to production config, example config, and test config
+- Fixed `test_while_loop_passthrough` -> `test_while_loop_allowed` in Python
+  tests (true and sleep are now in SAFE_CMDS)
+
 ## 2026-02-16
 
 - Bumped version to 26.02 (26.2.0 in Cargo.toml due to SemVer constraints),

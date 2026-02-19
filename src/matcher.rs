@@ -26,9 +26,15 @@ pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<String> {
         }
 
         trace!("Evaluating rule {} for tool: {}", idx, input.tool_name);
-        if let Some(decision) = check_rule(rule, input) {
-            debug!("Rule {} matched: {:?}", idx, decision);
-            return Some(decision);
+        if let Some(auto_reason) = check_rule(rule, input) {
+            // Custom reason is prepended; auto-generated reason with the
+            // actual command/path is always appended for specificity.
+            let reason = match &rule.reason {
+                Some(custom) => format!("{} ({})", custom, auto_reason),
+                None => auto_reason,
+            };
+            debug!("Rule {} matched: {:?}", idx, reason);
+            return Some(reason);
         }
     }
     trace!("No rules matched for tool: {}", input.tool_name);
@@ -221,6 +227,7 @@ mod tests {
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
+            reason: None,
         };
         assert!(is_tool_only_rule(&tool_only));
     }
@@ -239,6 +246,7 @@ mod tests {
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
+            reason: None,
         };
         assert!(!is_tool_only_rule(&with_regex));
     }
@@ -257,6 +265,7 @@ mod tests {
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
+            reason: None,
         };
         let input = HookInput {
             session_id: "test".to_string(),
@@ -285,6 +294,7 @@ mod tests {
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
+            reason: None,
         };
         let input = HookInput {
             session_id: "test".to_string(),
@@ -313,6 +323,7 @@ mod tests {
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
+            reason: None,
         };
         let input = HookInput {
             session_id: "test".to_string(),
@@ -341,9 +352,72 @@ mod tests {
             subagent_type_exclude_regex: None,
             prompt_regex: None,
             prompt_exclude_regex: None,
+            reason: None,
         };
 
         assert!(check_subagent_type(&rule, "codebase-analyzer"));
         assert!(!check_subagent_type(&rule, "other-agent"));
+    }
+
+    #[test]
+    fn test_custom_reason_overrides_auto() {
+        let rule = Rule {
+            tool: "Bash".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: Some(Regex::new(r"\$PYTHON\b").unwrap()),
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: Some("Use python3 directly instead of $PYTHON".to_string()),
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_input: serde_json::json!({"command": "$PYTHON foo.py"}),
+        };
+        let result = check_rules(&[rule], &input);
+        assert!(result.is_some());
+        let reason = result.unwrap();
+        // Custom reason is prepended, auto-generated reason appended
+        assert!(reason.starts_with("Use python3 directly instead of $PYTHON"));
+        assert!(reason.contains("$PYTHON foo.py"));
+    }
+
+    #[test]
+    fn test_no_custom_reason_uses_auto() {
+        let rule = Rule {
+            tool: "Bash".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: Some(Regex::new(r"^echo\b").unwrap()),
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_input: serde_json::json!({"command": "echo hello"}),
+        };
+        let result = check_rules(&[rule], &input);
+        assert!(result.is_some());
+        // Auto-generated reason should contain the command
+        assert!(result.unwrap().contains("echo hello"));
     }
 }
