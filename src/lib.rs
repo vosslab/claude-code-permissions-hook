@@ -100,6 +100,13 @@ pub fn process_hook_input_with_rules(
     // Decompose Bash commands and check each sub-command
     if input.tool_name == "Bash" {
         if let Some(command) = input.extract_field("command") {
+            // Check the original full command against deny rules first.
+            // This catches patterns (like heredocs) that the decomposer
+            // strips when extracting leaf commands.
+            if let Some(reason) = check_rules(deny_rules, input) {
+                return HookResult::deny(reason);
+            }
+
             let sub_commands = decomposer::decompose_command(&command);
 
             // Chain length limit: deny overly complex compound commands

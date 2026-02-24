@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-02-24
+
+- **Bug fix**: `$HOME` in rule fields was not expanded. Environment variables
+  are only expanded in `[variables]` values via `expand_env_vars()`, not in
+  rule regex fields. Rules like `file_path_regex = "^$HOME/nsh/"` matched
+  literal `$HOME`, never matching real paths. Fixed by adding `NSH_PATH` and
+  `CLAUDE_PATH` TOML variables and replacing all bare `$HOME` in rule fields
+  with `${NSH_PATH}`, `${CLAUDE_PATH}`, or existing `${HOME_PATH}`
+- Added `NSH_PATH = "^$HOME/nsh/"` and `CLAUDE_PATH = "^$HOME/\\.claude/"`
+  to `[variables]` in production TOML config
+- Added `file_path_exclude_regex = "${NO_TRAVERSAL}"` to `~/.claude/`
+  Write/Edit rules (was missing path traversal protection)
+- Added deny rule for `/opt/homebrew/bin/python3 -c` with inline code.
+  Custom reason directs Claude to write `.py` files and use
+  `source source_me.sh && python3 script.py` instead
+- Added allow rule for `/opt/homebrew/bin/python3` running `.py` files
+  directly (excludes `-c` flag and command substitution)
+- Added deny rule for heredoc patterns (`<<EOF`, `<<'EOF'`, `<<"EOF"`,
+  `<<-EOF`). Custom reason directs Claude to write `.py` or `.sh` files
+  instead of using inline heredocs
+- Changed `src/lib.rs` to check deny rules against the original full command
+  before decomposition. The decomposer strips redirections (including heredocs)
+  when extracting leaf commands, so heredoc deny rules were invisible to the
+  decomposed leaves. Now deny rules see both the full command and each leaf
+- Added 17 new tests to `tests/test_hook.py` (546 total, up from 529):
+  - 5 tests: heredoc patterns denied with educational reason
+  - 3 tests: homebrew python `-c` inline code denied with reason
+  - 3 tests: homebrew python running `.py` scripts allowed
+  - 4 tests: Write/Edit to `~/.claude/` paths allowed via `CLAUDE_PATH`
+  - 2 tests: Write/Edit traversal via `~/.claude/` not allowed
+- Updated `tests/test_config.toml` with `NSH_PATH`, `CLAUDE_PATH` variables,
+  homebrew python deny/allow rules, and `~/.claude/` Write/Edit rules
+
 ## 2026-02-18
 
 - Created [rotate_logs.sh](../rotate_logs.sh) to rotate `/tmp/claude-tool-use.json`

@@ -13,6 +13,9 @@ SYS_CMDS = "date|done|du|echo|env|export|expr|false|for|id|nproc|numfmt|printenv
 SAFE_CMDS = "${FILE_CMDS}|${FS_CMDS}|${SYS_CMDS}"
 NO_CMD_SUB = "`|\\$\\("
 
+NSH_PATH = "^/Users/korny/Dropbox/prj/"
+CLAUDE_PATH = "^/Users/korny/\\.claude/"
+
 # Deny rules - checked first (take precedence)
 
 # Deny path traversal in Read operations
@@ -46,6 +49,18 @@ command_regex = ".*\\bgit\\b.*\\bstash\\b"
 tool = "Bash"
 command_regex = ".*\\bgit\\b.*\\brm\\b"
 
+# Deny heredocs (<<EOF, <<'EOF', <<"EOF", <<-EOF, etc.)
+[[deny]]
+tool = "Bash"
+command_regex = "<<-?\\s*['\"]?\\w+"
+reason = "Do not use heredocs (<<EOF). Write code to a .py or .sh file instead."
+
+# Deny hardcoded homebrew python -c (inline code)
+[[deny]]
+tool = "Bash"
+command_regex = "/opt/homebrew/bin/python3[^\\s]*\\s+-c\\b"
+reason = "Do not use /opt/homebrew/bin/python3 -c with inline code. Write a .py file and run it with 'source source_me.sh && python3 script.py' or 'python3 script.py'."
+
 # Allow rules - checked after deny rules
 
 # Allow reads within the Dropbox project directory
@@ -75,6 +90,23 @@ file_path_regex = "^/Users/korny/Dropbox/prj/"
 [[allow]]
 tool = "Grep"
 file_path_regex = "^/Users/korny/Dropbox/prj/"
+
+# Allow homebrew python running .py files directly (but not -c)
+[[allow]]
+tool = "Bash"
+command_regex = "^/opt/homebrew/bin/python3[^\\s]*\\s+[^-]"
+command_exclude_regex = "\\s-c\\b|${NO_CMD_SUB}"
+
+# Write/Edit access to Claude internal files (~/.claude/)
+[[allow]]
+tool = "Write"
+file_path_regex = "${CLAUDE_PATH}"
+file_path_exclude_regex = "\\.\\."
+
+[[allow]]
+tool = "Edit"
+file_path_regex = "${CLAUDE_PATH}"
+file_path_exclude_regex = "\\.\\."
 
 # Allow safe cargo commands
 [[allow]]

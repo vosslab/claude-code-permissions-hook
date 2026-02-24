@@ -1851,3 +1851,94 @@ def test_decomposer_deny_overrides_safe_in_pipeline() -> None:
 	"""Even in a pipeline, if any sub-command triggers deny, the whole thing is denied."""
 	result = run_hook("Bash", {"command": "echo test | rm file"})
 	assert result["decision"] == "deny"
+
+
+# ===================================================================
+# Heredoc deny tests
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	'python3 - <<EOF\nprint("hello")\nEOF',
+	"bash <<EOF\necho hello\nEOF",
+	"cat <<'HEREDOC'\nsome content\nHEREDOC",
+	'python3 <<-INDENT\n\tprint("hi")\nINDENT',
+	'cat <<"END"\nstuff\nEND',
+])
+def test_heredoc_denied(command: str) -> None:
+	"""Heredoc patterns should be denied with educational reason."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "deny", \
+		f"Expected deny for heredoc command: '{command}': {result}"
+	assert "heredoc" in result["reason"].lower() or ".py" in result["reason"] or ".sh" in result["reason"], \
+		f"Deny reason should mention heredocs or file alternatives: {result['reason']}"
+
+
+# ===================================================================
+# Homebrew python -c deny / .py allow tests
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	'/opt/homebrew/bin/python3.12 -c "print(1)"',
+	"/opt/homebrew/bin/python3.12 -c 'import os; os.system(\"ls\")'",
+	'/opt/homebrew/bin/python3 -c "x=1"',
+])
+def test_homebrew_python_c_denied(command: str) -> None:
+	"""Hardcoded homebrew python with -c inline code should be denied with reason."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "deny", \
+		f"Expected deny for homebrew python -c: '{command}': {result}"
+	assert "inline code" in result["reason"].lower() or ".py file" in result["reason"], \
+		f"Deny reason should mention inline code or .py file: {result['reason']}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"/opt/homebrew/bin/python3.12 script.py",
+	"/opt/homebrew/bin/python3.12 tests/test_hook.py",
+	"/opt/homebrew/bin/python3 my_script.py",
+])
+def test_homebrew_python_script_allowed(command: str) -> None:
+	"""Homebrew python running a .py file should be allowed."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "allow", \
+		f"Expected allow for homebrew python with script: '{command}': {result}"
+
+
+# ===================================================================
+# Write/Edit to ~/.claude/ paths (variable expansion fix)
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("tool,file_path", [
+	("Write", "/Users/korny/.claude/plans/test.md"),
+	("Write", "/Users/korny/.claude/settings.json"),
+	("Edit", "/Users/korny/.claude/plans/test.md"),
+	("Edit", "/Users/korny/.claude/settings.json"),
+])
+def test_claude_dir_write_edit_allowed(tool: str, file_path: str) -> None:
+	"""Write/Edit to ~/.claude/ paths should be allowed via CLAUDE_PATH variable."""
+	if tool == "Write":
+		tool_input = {"file_path": file_path, "content": "test content"}
+	else:
+		tool_input = {"file_path": file_path, "old_string": "old", "new_string": "new"}
+	result = run_hook(tool, tool_input)
+	assert result["decision"] == "allow", \
+		f"Expected allow for {tool} to {file_path}: {result}"
+
+
+#============================================
+@pytest.mark.parametrize("tool,file_path", [
+	("Write", "/Users/korny/.claude/../../../etc/passwd"),
+	("Edit", "/Users/korny/.claude/../../etc/shadow"),
+])
+def test_claude_dir_traversal_not_allowed(tool: str, file_path: str) -> None:
+	"""Write/Edit to ~/.claude/ with path traversal should not be allowed."""
+	if tool == "Write":
+		tool_input = {"file_path": file_path, "content": "malicious"}
+	else:
+		tool_input = {"file_path": file_path, "old_string": "x", "new_string": "y"}
+	result = run_hook(tool, tool_input)
+	assert result["decision"] != "allow", \
+		f"SECURITY: {tool} traversal via .claude/ should not be allowed: {file_path}: {result}"
