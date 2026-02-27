@@ -171,14 +171,12 @@ def test_cargo_disallowed_subcommands_passthrough(command: str) -> None:
 	"ls -lah /tmp",
 	"ls --color=auto",
 	"ls -R /home",
-	# cat variants
+	# cat variants (relative paths only — absolute paths denied, use Read tool)
 	"cat README.md",
 	"cat -n file.txt",
-	"cat /dev/null",
-	# head/tail variants
+	# head/tail variants (relative paths only — absolute paths denied, use Read tool)
 	"head -n 10 file.txt",
 	"head -c 100 binary.dat",
-	"tail -f /var/log/syslog",
 	"tail -n 20 output.log",
 	"tail -100 data.csv",
 	# grep variants
@@ -231,8 +229,7 @@ def test_cargo_disallowed_subcommands_passthrough(command: str) -> None:
 	"comm sorted1.txt sorted2.txt",
 	"tee output.log",
 	"xargs echo",
-	"find . -name '*.py'",
-	"find /tmp -type f -name '*.log'",
+	# find commands now denied (use Glob tool), rg with relative paths still OK
 	"rg pattern src/",
 	"rg -n TODO .",
 	"source setup.sh",
@@ -268,11 +265,9 @@ def test_simple_utilities_allowed(command: str) -> None:
 	"echo test | wc -l",
 	"cat file.txt | sort | uniq -c",
 	"grep TODO src/*.py | wc -l",
-	"find . -name '*.txt' | head -20",
 	"echo test | tee output.txt",
 	# complex but safe pipelines
 	"cat data.csv | cut -d, -f1 | sort | uniq -c | sort -rn | head -20",
-	"find . -name '*.py' | xargs grep TODO | wc -l",
 	"ls -la | awk '{print $9}' | sort",
 	"grep -r pattern . | cut -d: -f1 | sort | uniq",
 	"echo hello | tr 'a-z' 'A-Z'",
@@ -390,10 +385,10 @@ def test_rm_substring_not_denied(command: str) -> None:
 def test_command_substitution_blocked(command: str) -> None:
 	"""Command substitution ($() or backticks) should be blocked by exclude regex.
 	The command starts with a safe utility but the exclude catches $( or backtick.
-	Result is passthrough (excluded from allow, no other rule matches).
+	Result is passthrough (excluded from allow) or deny (if another deny rule matches).
 	"""
 	result = run_hook("Bash", {"command": command})
-	assert result["decision"] == "passthrough", f"Expected passthrough for '{command}': {result}"
+	assert result["decision"] != "allow", f"Expected non-allow for '{command}': {result}"
 
 
 #============================================
@@ -1942,3 +1937,157 @@ def test_claude_dir_traversal_not_allowed(tool: str, file_path: str) -> None:
 	result = run_hook(tool, tool_input)
 	assert result["decision"] != "allow", \
 		f"SECURITY: {tool} traversal via .claude/ should not be allowed: {file_path}: {result}"
+
+
+# ===================================================================
+# Redundant bash -c / bash -lc deny tests
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	'bash -c "echo hello"',
+	'bash -lc "source source_me.sh && python3 test.py"',
+	'bash -cl "ls -la"',
+	"bash -c 'pytest tests/'",
+	'bash -lc "bash tests/run_html_lint.sh"',
+])
+def test_redundant_bash_c_denied(command: str) -> None:
+	"""bash -c / bash -lc wrappers are redundant inside the Bash tool."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "deny", \
+		f"Expected deny for redundant bash wrapper: '{command}': {result}"
+	assert "redundant" in result["reason"].lower(), \
+		f"Deny reason should mention redundancy: {result['reason']}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"bash tests/run_lint.sh",
+	"bash -n tests/run_lint.sh",
+	"bash my_script.sh --flag",
+])
+def test_bash_script_not_denied(command: str) -> None:
+	"""bash script.sh and bash -n script.sh should not be denied by the redundant-bash rule."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] != "deny", \
+		f"Expected non-deny for bash script invocation: '{command}': {result}"
+
+
+# ===================================================================
+# Deny find — use Glob tool instead
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"find /Users/korny -name '*.py'",
+	"find . -type f -name '*.rs'",
+	"find /Users/korny/Dropbox/prj -maxdepth 3 -name 'source_me.sh'",
+	"find /tmp -type d -name 'cache'",
+])
+def test_find_denied(command: str) -> None:
+	"""find commands should be denied — use the Glob tool instead."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "deny", \
+		f"Expected deny for find command: '{command}': {result}"
+	assert "Glob" in result["reason"], \
+		f"Deny reason should mention Glob tool: {result['reason']}"
+
+
+# ===================================================================
+# Deny cat/head/tail with file path — use Read tool instead
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"cat /Users/korny/Dropbox/prj/file.txt",
+	"cat -A /Users/korny/Dropbox/prj/docs/CHANGELOG.md",
+	"head -5 /Users/korny/Dropbox/prj/data.csv",
+	"head -20 /tmp/output.txt",
+	"tail -20 /Users/korny/Dropbox/prj/log.txt",
+	"head -100 /Users/korny/file.py",
+])
+def test_cat_head_tail_with_file_denied(command: str) -> None:
+	"""cat/head/tail with a file path should be denied — use Read tool."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "deny", \
+		f"Expected deny for file read command: '{command}': {result}"
+	assert "Read" in result["reason"], \
+		f"Deny reason should mention Read tool: {result['reason']}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"head -5",
+	"tail -20",
+	"cat",
+])
+def test_cat_head_tail_stdin_not_denied(command: str) -> None:
+	"""cat/head/tail without file path (stdin in pipeline) should not be denied."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] != "deny", \
+		f"Expected non-deny for stdin pipe usage: '{command}': {result}"
+
+
+# ===================================================================
+# Deny grep/rg with file path — use Grep tool instead
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"grep -n 'pattern' /Users/korny/Dropbox/prj/file.txt",
+	"grep -rn 'TODO' /Users/korny/Dropbox/prj/src/",
+	"rg 'function' /Users/korny/Dropbox/prj/lib.rs",
+	"grep -A 5 'def main' /Users/korny/Dropbox/prj/main.py",
+	"grep -E '(foo|bar)' /tmp/output.txt",
+])
+def test_grep_with_file_denied(command: str) -> None:
+	"""grep/rg with a file path should be denied — use Grep tool."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "deny", \
+		f"Expected deny for grep with file: '{command}': {result}"
+	assert "Grep" in result["reason"], \
+		f"Deny reason should mention Grep tool: {result['reason']}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"grep -v 'pattern'",
+	"grep -c 'matches'",
+	"grep -i 'search'",
+])
+def test_grep_stdin_not_denied(command: str) -> None:
+	"""grep without file path (stdin in pipeline) should not be denied."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] != "deny", \
+		f"Expected non-deny for grep filtering stdin: '{command}': {result}"
+
+
+# ===================================================================
+# Deny sed -n for line extraction — use Read tool instead
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"sed -n '380,410p' /Users/korny/Dropbox/prj/test.py",
+	"sed -n '1,50p' /tmp/output.txt",
+	"sed -n '100,200p' file.txt",
+])
+def test_sed_n_denied(command: str) -> None:
+	"""sed -n for line extraction should be denied — use Read tool."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "deny", \
+		f"Expected deny for sed -n command: '{command}': {result}"
+	assert "Read" in result["reason"], \
+		f"Deny reason should mention Read tool: {result['reason']}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"sed 's/foo/bar/'",
+	"sed 's/old/new/g'",
+])
+def test_sed_substitute_not_denied(command: str) -> None:
+	"""sed substitution (not -n) should not be denied by the sed -n rule."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] != "deny", \
+		f"Expected non-deny for sed substitution: '{command}': {result}"

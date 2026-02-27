@@ -55,6 +55,37 @@ tool = "Bash"
 command_regex = "<<-?\\s*['\"]?\\w+"
 reason = "Do not use heredocs (<<EOF). Write code to a .py or .sh file instead."
 
+# Deny redundant bash -c / bash -lc wrappers inside the Bash tool
+[[deny]]
+tool = "Bash"
+command_regex = "^bash\\s+-[a-zA-Z]*c[a-zA-Z]*\\s+"
+reason = "bash -c / bash -lc is redundant inside the Bash tool. Run the command directly."
+
+# Deny find — use the Glob tool instead
+[[deny]]
+tool = "Bash"
+command_regex = "^find\\b"
+reason = "Use the Glob tool instead of find. Example: Glob(pattern='**/*.py', path='/search/dir'). Glob supports recursive glob patterns and is faster than find."
+
+# Deny cat/head/tail when reading files (has an absolute path argument)
+# The [^>|]*/ avoids matching paths in redirects like 'cat file >> /tmp/out'
+[[deny]]
+tool = "Bash"
+command_regex = "^(cat|head|tail)\\b[^>|]*/"
+reason = "Use the Read tool instead of cat/head/tail. Read supports offset and limit parameters for reading specific line ranges."
+
+# Deny grep/rg when searching files (has an absolute path argument)
+[[deny]]
+tool = "Bash"
+command_regex = "^(grep|rg)\\b.*\\s/\\S"
+reason = "Use the Grep tool instead of grep/rg. Grep supports regex patterns, glob file filters, context lines (-A/-B/-C), head_limit, and output modes (content, files_with_matches, count)."
+
+# Deny sed -n for line extraction — use Read with offset and limit
+[[deny]]
+tool = "Bash"
+command_regex = "^sed\\s+-n\\b"
+reason = "Use the Read tool with offset and limit parameters instead of sed -n for extracting line ranges."
+
 # Deny hardcoded homebrew python -c (inline code)
 [[deny]]
 tool = "Bash"

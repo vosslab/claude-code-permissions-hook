@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-02-27
+
+- Added deny rule for redundant `bash -c` / `bash -lc` wrappers. The Bash
+  tool already runs bash, so `bash -lc "source source_me.sh && python ..."` is
+  unnecessary bash-in-bash. Pattern `^bash\s+-[a-zA-Z]*c[a-zA-Z]*\s+` catches
+  `-c`, `-lc`, `-cl` flags. Still allows `bash script.sh` and `bash -n script.sh`
+- Added 4 deny rules to enforce dedicated tool usage over Bash equivalents:
+  - `find` denied — agents must use the Glob tool instead
+  - `cat`/`head`/`tail` with absolute file path denied — agents must use the
+    Read tool (with offset/limit for line ranges). Pattern `[^>|]*/` avoids
+    matching redirect targets like `cat file >> /tmp/out.txt`
+  - `grep`/`rg` with absolute file path denied — agents must use the Grep tool.
+    Pattern `\s/\S` catches paths but not regex patterns containing `/`
+  - `sed -n` denied — agents must use Read tool with offset and limit params
+- Each deny rule includes an educational reason message explaining which tool
+  to use and what features it offers
+- Added 26 new tests (574 total): 4 find denied, 6 cat/head/tail denied,
+  3 cat/head/tail stdin not denied, 5 grep denied, 3 grep stdin not denied,
+  3 sed -n denied, 2 sed substitute not denied
+- Updated 5 existing tests that conflicted with new deny rules: removed
+  `find` and `cat /dev/null` from allow lists, relaxed command substitution
+  tests to accept deny or passthrough
+
 ## 2026-02-24
 
 - **Bug fix**: `$HOME` in rule fields was not expanded. Environment variables
