@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-03
+
+- **Bug fix**: Removed `AskUserQuestion` from `permissions.allow` in
+  `~/.claude/settings.json`. Claude Code's built-in permission system checks
+  `settings.json` **before** the PreToolUse hook runs, so having
+  `AskUserQuestion` in the allow list short-circuited the entire flow and
+  auto-approved the tool without rendering the interactive question dialog.
+  Users saw "User answered Claude's questions:" with blank answers but never
+  saw the actual question. The previous TOML hook change (removing
+  AskUserQuestion from the hook's internal allow rule) was harmless but
+  insufficient since the settings.json allow was the real root cause.
+
 ## 2026-02-27
 
 - Added deny rule for redundant `bash -c` / `bash -lc` wrappers. The Bash

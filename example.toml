@@ -205,7 +205,7 @@ subagent_type_regex = "^(Explore|general-purpose|Plan|Bash|haiku|sonnet|opus|sta
 # -------------------------------------------------------------------
 
 [[allow]]
-tool_regex = "^(TaskOutput|TaskCreate|TaskList|TaskGet|TaskUpdate|TaskStop|Skill|AskUserQuestion|ExitPlanMode|EnterPlanMode|SendMessage|TeamCreate|TeamDelete|NotebookEdit)$"
+tool_regex = "^(TaskOutput|TaskCreate|TaskList|TaskGet|TaskUpdate|TaskStop|Skill|ExitPlanMode|EnterPlanMode|SendMessage|TeamCreate|TeamDelete|NotebookEdit)$"
 
 # -------------------------------------------------------------------
 # Playwright MCP browser tools (sandboxed browser interaction)
