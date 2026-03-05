@@ -65,6 +65,18 @@ command_regex = ".*\\bgit\\b.*\\bstash\\b"
 tool = "Bash"
 command_regex = ".*\\bgit\\b.*\\bclean\\b"
 
+# Deny for loops (force .py/.sh files for looping logic)
+[[deny]]
+tool = "Bash"
+command_regex = "^for\\b"
+reason = "Do not use for loops in Bash tool. Write the logic in a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
+
+# Deny while loops (force .py/.sh files for looping logic)
+[[deny]]
+tool = "Bash"
+command_regex = "^while\\b"
+reason = "Do not use while loops in Bash tool. Write the logic in a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
+
 # Deny git rm
 [[deny]]
 tool = "Bash"
@@ -81,6 +93,11 @@ command_regex = ".*\\bgit\\b.*\\brm\\b"
 # (&&, ||, ;, pipes, loops) and unwraps bash -c "..." patterns into
 # leaf sub-commands.  Each leaf is checked independently against these
 # rules, so simple per-command rules are sufficient.
+
+# Allow rm on underscore-prefixed files (temporary/scratch files)
+[[allow]]
+tool = "Bash"
+command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*_\\S+"
 
 # -------------------------------------------------------------------
 # Bash: python tooling

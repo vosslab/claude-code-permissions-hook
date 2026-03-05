@@ -2,6 +2,28 @@
 
 ## 2026-03-05
 
+### Additions and New Features
+
+- Added `while` loop deny rule to production TOML and `example.toml`, matching
+  existing `for` loop deny. Reason messages direct Claude to use underscore-prefixed
+  scratch files
+- Added `rm` allow rule for underscore-prefixed files (`_temp.py`, `_scratch.sh`,
+  etc.) in both production TOML and `example.toml`. Also added exclude pattern to
+  the rm deny rule so `rm _foo.py` bypasses the deny
+- Added `for` and `while` loop deny rules to `example.toml` (previously only in
+  production config)
+
+### Behavior or Interface Changes
+
+- Updated deny reason messages to recommend underscore-prefixed files as the
+  preferred pattern for throwaway scripts:
+  - Heredoc deny: "Write code to a `_temp.py` or `_temp.sh` file instead"
+  - For-loop deny: "Write the logic in a `_temp.py` or `_temp.sh` file instead"
+  - While-loop deny: same message as for-loop
+  - Homebrew python `-c` deny: "Write a `_temp.py` file" instead of "a `.py` file"
+- All updated reason messages include "(underscore-prefixed files can be removed
+  freely)" suffix
+
 ### Fixes and Maintenance
 
 - **Rust cwd fallback for Glob/Grep**: When the `path` field is omitted (70%
