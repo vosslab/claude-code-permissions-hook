@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-03-05
+
+### Fixes and Maintenance
+
+- **Rust cwd fallback for Glob/Grep**: When the `path` field is omitted (70%
+  of Glob/Grep passthroughs), the hook now falls back to `input.cwd` instead
+  of passing through. This eliminates the majority of unnecessary passthroughs.
+  Added 4 unit tests (glob/grep cwd fallback match, no-match, explicit path
+  override). Updated 2 Python tests from passthrough to allow expectation
+
+### Additions and New Features
+
+- Synced `example.toml` with production TOML changes: removed `for` from
+  `SYS_CMDS`, added `git clean` deny rule, expanded git subcommand allowlist
+  with `branch`, `remote`, `rev-parse`, `worktree`, `ls-tree`
+- Added 3 new deny rules to production TOML config:
+  - `git clean` denied: destructive command that removes untracked files
+  - `for` loops denied: forces looping logic into `.py` or `.sh` files
+  - `gh` CLI denied: not installed on this system
+- Removed `for` and `done` from `SYS_CMDS` (now denied instead of allowed)
+- Expanded git subcommand allowlist: added `branch`, `remote`, `rev-parse`,
+  `worktree` (read-only or standard workflow commands)
+- Added `pip3 show|list|freeze|check` allow rule (read-only pip commands)
+- Added `Read` allow rule for Homebrew site-packages paths
+  (`/opt/homebrew/` and `/usr/local/` Python site-packages)
+- Added `Glob` and `Grep` allow rules for `~/.claude/` paths
+- Expanded `SYS_CMDS`: added `curl`, `ln`, `pkill`, `screencapture`,
+  `unlink`, `xxd`
+
 ## 2026-03-03
 
 - **Bug fix**: Removed `AskUserQuestion` from `permissions.allow` in
@@ -19,13 +48,13 @@
   unnecessary bash-in-bash. Pattern `^bash\s+-[a-zA-Z]*c[a-zA-Z]*\s+` catches
   `-c`, `-lc`, `-cl` flags. Still allows `bash script.sh` and `bash -n script.sh`
 - Added 4 deny rules to enforce dedicated tool usage over Bash equivalents:
-  - `find` denied — agents must use the Glob tool instead
-  - `cat`/`head`/`tail` with absolute file path denied — agents must use the
+  - `find` denied - agents must use the Glob tool instead
+  - `cat`/`head`/`tail` with absolute file path denied - agents must use the
     Read tool (with offset/limit for line ranges). Pattern `[^>|]*/` avoids
     matching redirect targets like `cat file >> /tmp/out.txt`
-  - `grep`/`rg` with absolute file path denied — agents must use the Grep tool.
+  - `grep`/`rg` with absolute file path denied - agents must use the Grep tool.
     Pattern `\s/\S` catches paths but not regex patterns containing `/`
-  - `sed -n` denied — agents must use Read tool with offset and limit params
+  - `sed -n` denied - agents must use Read tool with offset and limit params
 - Each deny rule includes an educational reason message explaining which tool
   to use and what features it offers
 - Added 26 new tests (574 total): 4 find denied, 6 cat/head/tail denied,

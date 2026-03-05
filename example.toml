@@ -25,7 +25,7 @@ FILE_CMDS = "awk|cat|comm|cut|diff|expand|file|fmt|fold|grep|head|nl|od|paste|rg
 # Filesystem navigation and management
 FS_CMDS = "basename|cd|chmod|cp|dirname|du|df|find|ls|lsof|mkdir|mktemp|readlink|realpath|stat|touch|tree"
 # Process and system info
-SYS_CMDS = "date|echo|env|export|expr|false|for|id|nproc|numfmt|printenv|printf|pwd|sleep|source|test|timeout|true|tty|uname|which|whoami"
+SYS_CMDS = "date|echo|env|export|expr|false|id|nproc|numfmt|printenv|printf|pwd|sleep|source|test|timeout|true|tty|uname|which|whoami"
 # Merged safe commands (variable references expand automatically)
 SAFE_CMDS = "${FILE_CMDS}|${FS_CMDS}|${SYS_CMDS}"
 # Block command substitution (backtick and $(...))
@@ -59,6 +59,11 @@ command_regex = ".*\\bgit\\b.*\\bcommit\\b"
 [[deny]]
 tool = "Bash"
 command_regex = ".*\\bgit\\b.*\\bstash\\b"
+
+# Deny git clean (destructive)
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\bclean\\b"
 
 # Deny git rm
 [[deny]]
@@ -105,7 +110,7 @@ command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CM
 
 [[allow]]
 tool = "Bash"
-command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|checkout|diff|log|ls-files|mv|pull|restore|show|status)(\\s|$)"
+command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|checkout|diff|log|ls-files|ls-tree|mv|pull|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
 
 # -------------------------------------------------------------------
 # Bash: run a shell script directly (with optional -n syntax check)

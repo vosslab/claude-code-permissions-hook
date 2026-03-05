@@ -61,7 +61,7 @@ tool = "Bash"
 command_regex = "^bash\\s+-[a-zA-Z]*c[a-zA-Z]*\\s+"
 reason = "bash -c / bash -lc is redundant inside the Bash tool. Run the command directly."
 
-# Deny find — use the Glob tool instead
+# Deny find - use the Glob tool instead
 [[deny]]
 tool = "Bash"
 command_regex = "^find\\b"
@@ -80,7 +80,7 @@ tool = "Bash"
 command_regex = "^(grep|rg)\\b.*\\s/\\S"
 reason = "Use the Grep tool instead of grep/rg. Grep supports regex patterns, glob file filters, context lines (-A/-B/-C), head_limit, and output modes (content, files_with_matches, count)."
 
-# Deny sed -n for line extraction — use Read with offset and limit
+# Deny sed -n for line extraction - use Read with offset and limit
 [[deny]]
 tool = "Bash"
 command_regex = "^sed\\s+-n\\b"

@@ -77,17 +77,20 @@ fn check_rule(rule: &Rule, input: &HookInput) -> Option<String> {
             }
         }
         "Glob" | "Grep" => {
-            // Glob and Grep use "path" field, not "file_path"
-            if let Some(path) = input.extract_field("path")
-                && check_field_with_exclude(
-                    &path,
-                    &rule.file_path_regex,
-                    &rule.file_path_exclude_regex,
-                )
-            {
+            // Glob and Grep use "path" field, not "file_path".
+            // When "path" is omitted, Claude uses cwd instead, so
+            // fall back to cwd to avoid unnecessary passthroughs.
+            let effective_path = input
+                .extract_field("path")
+                .unwrap_or_else(|| input.cwd.clone());
+            if check_field_with_exclude(
+                &effective_path,
+                &rule.file_path_regex,
+                &rule.file_path_exclude_regex,
+            ) {
                 return Some(format!(
                     "Matched rule for {} with path: {}",
-                    input.tool_name, path
+                    input.tool_name, effective_path
                 ));
             }
         }
@@ -336,6 +339,124 @@ mod tests {
         let result = check_rule(&rule, &input);
         assert!(result.is_some());
         assert!(result.unwrap().contains("path:"));
+    }
+
+    #[test]
+    fn test_glob_cwd_fallback_when_no_path() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/project").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+        };
+        // No "path" field in tool_input -- should fall back to cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user/project".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"pattern": "**/*.rs"}),
+        };
+        let result = check_rule(&rule, &input);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("/home/user/project"));
+    }
+
+    #[test]
+    fn test_grep_cwd_fallback_when_no_path() {
+        let rule = Rule {
+            tool: "Grep".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+        };
+        // No "path" field -- falls back to cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user/project".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Grep".to_string(),
+            tool_input: serde_json::json!({"pattern": "fn main"}),
+        };
+        let result = check_rule(&rule, &input);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("/home/user/project"));
+    }
+
+    #[test]
+    fn test_glob_cwd_fallback_no_match() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+        };
+        // cwd is outside the allowed path -- should NOT match
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/etc".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"pattern": "*.conf"}),
+        };
+        let result = check_rule(&rule, &input);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_glob_explicit_path_overrides_cwd() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+        };
+        // Explicit path provided -- should use it, not cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/etc".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"path": "/home/user/project", "pattern": "*.rs"}),
+        };
+        let result = check_rule(&rule, &input);
+        assert!(result.is_some());
     }
 
     #[test]

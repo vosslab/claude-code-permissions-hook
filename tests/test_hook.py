@@ -171,10 +171,10 @@ def test_cargo_disallowed_subcommands_passthrough(command: str) -> None:
 	"ls -lah /tmp",
 	"ls --color=auto",
 	"ls -R /home",
-	# cat variants (relative paths only — absolute paths denied, use Read tool)
+	# cat variants (relative paths only - absolute paths denied, use Read tool)
 	"cat README.md",
 	"cat -n file.txt",
-	# head/tail variants (relative paths only — absolute paths denied, use Read tool)
+	# head/tail variants (relative paths only - absolute paths denied, use Read tool)
 	"head -n 10 file.txt",
 	"head -c 100 binary.dat",
 	"tail -n 20 output.log",
@@ -576,17 +576,17 @@ def test_grep_outside_path_passthrough(path: str) -> None:
 
 
 #============================================
-def test_glob_no_path_passthrough() -> None:
-	"""Glob with no path field should passthrough (no field to match against)."""
+def test_glob_no_path_uses_cwd() -> None:
+	"""Glob with no path field should fall back to cwd for matching."""
 	result = run_hook("Glob", {"pattern": "*.rs"})
-	assert result["decision"] == "passthrough"
+	assert result["decision"] == "allow"
 
 
 #============================================
-def test_grep_no_path_passthrough() -> None:
-	"""Grep with no path field should passthrough."""
+def test_grep_no_path_uses_cwd() -> None:
+	"""Grep with no path field should fall back to cwd for matching."""
 	result = run_hook("Grep", {"pattern": "fn main"})
-	assert result["decision"] == "passthrough"
+	assert result["decision"] == "allow"
 
 
 #============================================
@@ -1974,7 +1974,7 @@ def test_bash_script_not_denied(command: str) -> None:
 
 
 # ===================================================================
-# Deny find — use Glob tool instead
+# Deny find - use Glob tool instead
 # ===================================================================
 
 #============================================
@@ -1985,7 +1985,7 @@ def test_bash_script_not_denied(command: str) -> None:
 	"find /tmp -type d -name 'cache'",
 ])
 def test_find_denied(command: str) -> None:
-	"""find commands should be denied — use the Glob tool instead."""
+	"""find commands should be denied - use the Glob tool instead."""
 	result = run_hook("Bash", {"command": command})
 	assert result["decision"] == "deny", \
 		f"Expected deny for find command: '{command}': {result}"
@@ -1994,7 +1994,7 @@ def test_find_denied(command: str) -> None:
 
 
 # ===================================================================
-# Deny cat/head/tail with file path — use Read tool instead
+# Deny cat/head/tail with file path - use Read tool instead
 # ===================================================================
 
 #============================================
@@ -2007,7 +2007,7 @@ def test_find_denied(command: str) -> None:
 	"head -100 /Users/korny/file.py",
 ])
 def test_cat_head_tail_with_file_denied(command: str) -> None:
-	"""cat/head/tail with a file path should be denied — use Read tool."""
+	"""cat/head/tail with a file path should be denied - use Read tool."""
 	result = run_hook("Bash", {"command": command})
 	assert result["decision"] == "deny", \
 		f"Expected deny for file read command: '{command}': {result}"
@@ -2029,7 +2029,7 @@ def test_cat_head_tail_stdin_not_denied(command: str) -> None:
 
 
 # ===================================================================
-# Deny grep/rg with file path — use Grep tool instead
+# Deny grep/rg with file path - use Grep tool instead
 # ===================================================================
 
 #============================================
@@ -2041,7 +2041,7 @@ def test_cat_head_tail_stdin_not_denied(command: str) -> None:
 	"grep -E '(foo|bar)' /tmp/output.txt",
 ])
 def test_grep_with_file_denied(command: str) -> None:
-	"""grep/rg with a file path should be denied — use Grep tool."""
+	"""grep/rg with a file path should be denied - use Grep tool."""
 	result = run_hook("Bash", {"command": command})
 	assert result["decision"] == "deny", \
 		f"Expected deny for grep with file: '{command}': {result}"
@@ -2063,7 +2063,7 @@ def test_grep_stdin_not_denied(command: str) -> None:
 
 
 # ===================================================================
-# Deny sed -n for line extraction — use Read tool instead
+# Deny sed -n for line extraction - use Read tool instead
 # ===================================================================
 
 #============================================
@@ -2073,7 +2073,7 @@ def test_grep_stdin_not_denied(command: str) -> None:
 	"sed -n '100,200p' file.txt",
 ])
 def test_sed_n_denied(command: str) -> None:
-	"""sed -n for line extraction should be denied — use Read tool."""
+	"""sed -n for line extraction should be denied - use Read tool."""
 	result = run_hook("Bash", {"command": command})
 	assert result["decision"] == "deny", \
 		f"Expected deny for sed -n command: '{command}': {result}"
