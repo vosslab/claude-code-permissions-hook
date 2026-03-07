@@ -82,6 +82,12 @@ reason = "Do not use while loops in Bash tool. Write the logic in a _temp.py or 
 tool = "Bash"
 command_regex = ".*\\bgit\\b.*\\brm\\b"
 
+# Deny bare mv (use git mv for tracked files)
+[[deny]]
+tool = "Bash"
+command_regex = "^mv\\b"
+reason = "Use 'git mv' for tracked files. If the file is untracked, use cp + rm or ask the user."
+
 # Example: deny with custom reason (shown to Claude when rule fires)
 # [[deny]]
 # tool = "Bash"
@@ -136,6 +142,15 @@ command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|checkout|diff|log|ls-files
 [[allow]]
 tool = "Bash"
 command_regex = "^bash\\s+(-n\\s+)?[A-Za-z0-9_./-]+\\.sh\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: execute a shell script via relative path (./script.sh)
+# -------------------------------------------------------------------
+
+[[allow]]
+tool = "Bash"
+command_regex = "^\\./[A-Za-z0-9_.-]+\\.sh\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
@@ -219,7 +234,7 @@ tool = "WebSearch"
 # -------------------------------------------------------------------
 
 [[allow]]
-tool = "Task"
+tool = "Agent"
 subagent_type_regex = "^(Explore|general-purpose|Plan|Bash|haiku|sonnet|opus|statusline-setup|claude-code-guide|superpowers:code-reviewer)$"
 
 # -------------------------------------------------------------------

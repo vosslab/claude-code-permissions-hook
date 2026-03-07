@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026-03-06
+
+### Fixes and Maintenance
+
+- **Fixed Agent vs Task tool name mismatch**: Claude Code sends tool name
+  `Agent` but matcher.rs only handled `Task`. Added `"Agent"` as an alias
+  alongside `"Task"` in the match arm of `check_rule()`. This eliminates
+  364 passthroughs (26% of total) from the passthrough log
+- Changed `tool = "Task"` to `tool = "Agent"` in the production TOML
+  subagent allow rule to match what Claude Code actually sends
+
+### Additions and New Features
+
+- Did NOT add `AskUserQuestion` to the TOML internal tools regex. Per the
+  2026-03-03 bug fix, auto-approving this tool (whether via `settings.json`
+  or the TOML hook) bypasses Claude Code's interactive question dialog,
+  causing blank answers. The 61 AskUserQuestion passthroughs are intentional
+- Added `./script.sh` allow rule for relative-path shell script execution
+  (pattern: `^\./[A-Za-z0-9_.-]+\.sh\b`)
+- Added `mv` deny rule to enforce `git mv` convention for tracked files
+
+### Behavior or Interface Changes
+
+- **Removed conflicting `settings.json` allow entries**: Stripped all Bash,
+  Glob, Task, Read, Write, WebFetch, WebSearch, and orchestration tool
+  entries from `~/.claude/settings.json` permissions allow list. These were
+  bypassing the TOML hook entirely (settings.json is evaluated before the
+  PreToolUse hook). Only Skill entries remain. The TOML hook is now the
+  single source of truth for permissions
+
+### Decisions and Failures
+
+- Passthrough log assessment (2026-02-27 to 2026-03-07): 1,405 entries
+  reviewed. Glob (49%) and Grep (16%) passthroughs attributed to cwd
+  fallback fix from 2026-03-05. Agent (26%) addressed by this changeset.
+  AskUserQuestion (4%) intentionally left as passthrough per 2026-03-03
+  bug fix. Read passthroughs (1%) flagged for investigation -- existing
+  rules should cover them
+
 ## 2026-03-05
 
 ### Additions and New Features

@@ -105,19 +105,22 @@ fn check_rule(rule: &Rule, input: &HookInput) -> Option<String> {
                 return Some(format!("Matched rule for Bash with command: {}", command));
             }
         }
-        "Task" => {
+        "Task" | "Agent" => {
             if let Some(subagent_type) = input.extract_field("subagent_type")
                 && check_subagent_type(rule, &subagent_type)
             {
                 return Some(format!(
-                    "Matched rule for Task with subagent_type: {}",
-                    subagent_type
+                    "Matched rule for {} with subagent_type: {}",
+                    input.tool_name, subagent_type
                 ));
             }
             if let Some(prompt) = input.extract_field("prompt")
                 && check_field_with_exclude(&prompt, &rule.prompt_regex, &rule.prompt_exclude_regex)
             {
-                return Some("Matched rule for Task with prompt pattern".to_string());
+                return Some(format!(
+                    "Matched rule for {} with prompt pattern",
+                    input.tool_name
+                ));
             }
         }
         _ => {}
