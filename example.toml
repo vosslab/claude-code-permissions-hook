@@ -242,7 +242,22 @@ subagent_type_regex = "^(Explore|general-purpose|Plan|Bash|haiku|sonnet|opus|sta
 # -------------------------------------------------------------------
 
 [[allow]]
-tool_regex = "^(TaskOutput|TaskCreate|TaskList|TaskGet|TaskUpdate|TaskStop|Skill|ExitPlanMode|EnterPlanMode|SendMessage|TeamCreate|TeamDelete|NotebookEdit)$"
+tool_regex = "^(TaskOutput|TaskCreate|TaskList|TaskGet|TaskUpdate|TaskStop|Skill|SendMessage|TeamCreate|TeamDelete|NotebookEdit)$"
+
+# -------------------------------------------------------------------
+# MUST PASSTHROUGH - tools with interactive UI dialogs
+# Auto-approving these bypasses Claude Code's user-facing dialogs,
+# causing blank answers or skipped consent screens.
+# Do NOT add these to any allow rule:
+#   - AskUserQuestion  (interactive question dialog; blank if auto-allowed)
+#   - EnterPlanMode    (user must consent to entering plan mode)
+#   - ExitPlanMode     (user must review and approve the plan)
+#   - EnterWorktree    (user must consent to worktree creation)
+#   - ExitWorktree     (user must consent to keep/remove worktree)
+#   - CronCreate       (user should approve scheduled recurring jobs)
+#   - CronDelete       (user should approve canceling scheduled jobs)
+#   - CronList         (read-only but kept consistent with Cron tools)
+# -------------------------------------------------------------------
 
 # -------------------------------------------------------------------
 # Playwright MCP browser tools (sandboxed browser interaction)

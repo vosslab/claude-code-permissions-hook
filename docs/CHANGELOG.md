@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-03-13
+
+### Fixes and Maintenance
+
+- **Removed ExitPlanMode and EnterPlanMode from auto-allow rule**: Auto-approving
+  these tools bypasses Claude Code's interactive UI dialogs (user never sees the
+  plan review screen). Same class of bug as AskUserQuestion (see 2026-03-03).
+  Both tools now passthrough to Claude Code's default handling. Updated production
+  TOML and `example.toml`
+
+### Additions and New Features
+
+- Added MUST PASSTHROUGH documentation block to both production TOML and
+  `example.toml` listing the eight tools that must never be auto-allowed:
+  `AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`, `EnterWorktree`,
+  `ExitWorktree`, `CronCreate`, `CronDelete`, `CronList`. The first five
+  have interactive UI dialogs that break if bypassed; the Cron tools are
+  kept as passthrough so the user approves scheduled jobs
+
+### Decisions and Failures
+
+- Full audit of all Claude Code tools (30+) against allow/deny/passthrough
+  classification. All tools with interactive user-facing dialogs must passthrough;
+  all stateless orchestration tools can be safely auto-allowed. The audit
+  confirmed the existing rules are correct except for the ExitPlanMode/
+  EnterPlanMode bug fixed in this changeset
+
 ## 2026-03-06
 
 ### Fixes and Maintenance
