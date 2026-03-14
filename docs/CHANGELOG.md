@@ -2,7 +2,47 @@
 
 ## 2026-03-13
 
+### Additions and New Features
+
+- Created [docs/CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md): comprehensive
+  best-practices guide for AI agents working in repos that use the permissions hook.
+  Covers allowed/denied/passthrough commands, file access zones, safe utility lists,
+  common patterns cheat sheet, and preferred alternatives for every deny rule. Sourced
+  from the production TOML config (21 deny rules, 37 allow rules)
+- Added 11 Gas Town agent types to Agent subagent allowlist: `coder`, `reviewer`,
+  `tester`, `maintainer`, `planner`, `orchestrator`, `integrator`, `architect`,
+  `scheduler`, `monitor`, `parallelizer`. Eliminates 22 Agent passthroughs from
+  the 2026-03-09 to 2026-03-13 assessment (20 coder + 2 reviewer)
+- Added `git check-ignore` to git subcommand allowlist (read-only, safe). Eliminates
+  2 passthroughs
+- Added Glob and Grep allow rules for `/tmp/` and `/private/tmp/` paths, consistent
+  with existing Read/Write/Edit `/tmp/` rules. Eliminates 3 Grep passthroughs
+- Added deny rule for absolute-path `grep`/`rg` invocations (e.g.
+  `/opt/homebrew/bin/rg`). The existing `^(grep|rg)` deny was bypassable via full
+  path. Pattern: `^/\S*(grep|rg)\b.*\s/\S`
+- Added allow rule for executing Python scripts via relative path
+  (`./script.py`, `./dir/script.py`). Eliminates 10 Bash passthroughs from piped
+  python script execution
+- Broadened variable assignment deny rules from uppercase-only (`^[A-Z_]+=`) to
+  include lowercase (`^[A-Za-z_]+=`). Closes gap where `project=$(basename...)`
+  bypassed the uppercase-only pattern
+
 ### Fixes and Maintenance
+
+- **Rust: absolutize relative paths for Glob/Grep**: When the `path` field is a
+  relative path (e.g. `emwy_tools/track_runner`), the hook now prepends `cwd + "/"`
+  to make it absolute before matching against allow rules. Previously relative paths
+  never matched `^$HOME/nsh/` patterns. Eliminates 10 Grep passthroughs. Added 2
+  unit tests (`test_grep_relative_path_absolutized`, `test_glob_relative_path_absolutized`)
+
+### Decisions and Failures
+
+- Passthrough log assessment (2026-03-09 to 2026-03-13): 185 entries across 39
+  sessions. 130/185 (70%) are expected passthroughs (ExitPlanMode, AskUserQuestion,
+  EnterPlanMode). Remaining 55 addressed by 7 changes in this changeset. 1 pip3
+  install passthrough correctly requires user approval
+
+### Removals and Deprecations
 
 - **Removed ExitPlanMode and EnterPlanMode from auto-allow rule**: Auto-approving
   these tools bypasses Claude Code's interactive UI dialogs (user never sees the

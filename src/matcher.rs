@@ -80,9 +80,15 @@ fn check_rule(rule: &Rule, input: &HookInput) -> Option<String> {
             // Glob and Grep use "path" field, not "file_path".
             // When "path" is omitted, Claude uses cwd instead, so
             // fall back to cwd to avoid unnecessary passthroughs.
-            let effective_path = input
+            let raw_path = input
                 .extract_field("path")
                 .unwrap_or_else(|| input.cwd.clone());
+            // Absolutize relative paths by prepending cwd
+            let effective_path = if raw_path.starts_with('/') {
+                raw_path
+            } else {
+                format!("{}/{}", input.cwd, raw_path)
+            };
             if check_field_with_exclude(
                 &effective_path,
                 &rule.file_path_regex,
@@ -402,6 +408,66 @@ mod tests {
         let result = check_rule(&rule, &input);
         assert!(result.is_some());
         assert!(result.unwrap().contains("/home/user/project"));
+    }
+
+    #[test]
+    fn test_grep_relative_path_absolutized() {
+        let rule = Rule {
+            tool: "Grep".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/project/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+        };
+        // Relative path "src/lib.rs" should be prepended with cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user/project".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Grep".to_string(),
+            tool_input: serde_json::json!({"path": "src/lib.rs", "pattern": "fn main"}),
+        };
+        let result = check_rule(&rule, &input);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("/home/user/project/src/lib.rs"));
+    }
+
+    #[test]
+    fn test_glob_relative_path_absolutized() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/project/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+        };
+        // Relative path "subdir" should be prepended with cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user/project".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"path": "subdir", "pattern": "*.rs"}),
+        };
+        let result = check_rule(&rule, &input);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("/home/user/project/subdir"));
     }
 
     #[test]
