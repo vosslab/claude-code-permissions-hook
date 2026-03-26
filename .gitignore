@@ -1,12 +1,3 @@
-debug/
-target/
-/.vscode
-report_shebang.txt
-report_pyflakes.txt
-report_ascii_compliance.txt
+claude-code-permissions-hook.toml
+report*.txt
 .DS_Store
-report_bandit.txt
-report_pyright.txt
-report_import_star.txt
-report_import_dot.txt
-report_import_requirements.txt
