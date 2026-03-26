@@ -4,6 +4,13 @@
 
 ### Additions and New Features
 
+- Added `tests/test_plan_mode_enforcement.sh`: standalone shell script that tests
+  whether Claude Code enforces plan mode at the runtime level. Invokes
+  `claude -p --permission-mode plan --dangerously-skip-permissions` and checks if
+  a temp file was edited. Confirms upstream bug (anthropics/claude-code#14570,
+  #19874) is present in v2.1.84. Exit codes: 0=PASS (fixed), 1=FAIL (bug present),
+  2=SKIP (setup issue)
+
 - **TOML trust model restructure**: separated "can execute code" from "can change the
   machine". `JS_CMDS` removed; runtimes moved out of `SAFE_CMDS` into new
   `LOCAL_RUNTIMES = "node|deno"` with constrained allow patterns (.js/.mjs/.cjs files,
