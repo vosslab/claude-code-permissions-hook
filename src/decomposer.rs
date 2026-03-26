@@ -113,12 +113,17 @@ fn extract_from_command(cmd: &ast::Command) -> Vec<String> {
             if let Some(inner) = try_unwrap_bash_c(simple) {
                 return decompose_command(&inner);
             }
-            let s = simple_command_to_string(simple);
-            if s.is_empty() {
-                vec![]
-            } else {
-                vec![s]
+            let normalized = simple_command_to_normalized(simple);
+            let mut result = Vec::new();
+            if !normalized.command.is_empty() {
+                result.push(normalized.command);
             }
+            // Add $() substitutions found in stripped env-var assignments
+            // so they still get rule-checked (e.g. name=$(basename "$file"))
+            for inner in normalized.assignment_substitutions {
+                result.extend(decompose_command(&inner));
+            }
+            result
         }
         ast::Command::Compound(compound, _redirect_list) => {
             extract_from_compound_command(compound)
@@ -275,8 +280,17 @@ fn extract_from_compound_command(cmd: &ast::CompoundCommand) -> Vec<String> {
 /// Collects prefix words, the command name, and suffix words.
 /// I/O redirections are intentionally skipped since they do not
 /// affect which program runs.
-fn simple_command_to_string(cmd: &ast::SimpleCommand) -> String {
+/// Result of converting a simple command to a normalized string.
+/// Contains the main command (with env-var assignments stripped)
+/// and any $() substitutions found inside stripped assignment values.
+struct NormalizedCommand {
+    command: String,
+    assignment_substitutions: Vec<String>,
+}
+
+fn simple_command_to_normalized(cmd: &ast::SimpleCommand) -> NormalizedCommand {
     let mut parts: Vec<String> = Vec::new();
+    let mut assignment_subs: Vec<String> = Vec::new();
 
     // Prefix items (assignments and words)
     if let Some(ref prefix) = cmd.prefix {
@@ -286,7 +300,17 @@ fn simple_command_to_string(cmd: &ast::SimpleCommand) -> String {
                     parts.push(w.value.clone());
                 }
                 ast::CommandPrefixOrSuffixItem::AssignmentWord(_, w) => {
-                    parts.push(w.value.clone());
+                    // Strip env-var assignments from the leaf command string.
+                    // The AST parser identifies assignments structurally,
+                    // so no regex needed. This is syntax-level normalization:
+                    // "NODE_PATH=/foo node script.js" -> "node script.js"
+                    // TOML rules then match the normalized command only.
+                    //
+                    // Still extract $() from assignment values so commands
+                    // inside them get rule-checked (e.g. name=$(basename "$file")).
+                    for inner in extract_command_substitutions(&w.value) {
+                        assignment_subs.push(inner);
+                    }
                 }
                 _ => {} // skip IoRedirect, ProcessSubstitution
             }
@@ -310,8 +334,12 @@ fn simple_command_to_string(cmd: &ast::SimpleCommand) -> String {
         }
     }
 
-    parts.join(" ")
+    NormalizedCommand {
+        command: parts.join(" "),
+        assignment_substitutions: assignment_subs,
+    }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -485,6 +513,7 @@ mod tests {
     fn test_cmd_sub_in_assignment() {
         // VAR=$(git rev-parse --show-toplevel)
         let result = decompose_command("REPO_ROOT=$(git rev-parse --show-toplevel)");
+
         assert!(result.contains(&"git rev-parse --show-toplevel".to_string()));
     }
 
@@ -519,6 +548,7 @@ mod tests {
         let result = decompose_command(
             r#"for file in *.py; do name=$(basename "$file"); echo "$name"; done"#,
         );
+
         assert!(result.contains(&"echo \"$name\"".to_string()));
         // basename extracted from $() inside the loop body
         assert!(result.contains(&"basename \"$file\"".to_string()));
@@ -531,5 +561,45 @@ mod tests {
             "for locale in cs de fr; do echo $locale; done",
         );
         assert_eq!(result, vec!["echo $locale"]);
+    }
+
+    // ---------------------------------------------------------------
+    // env-var assignment stripping tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_env_prefix_stripped_uppercase() {
+        // Uppercase env prefix should be stripped from the leaf
+        let result = decompose_command("NODE_PATH=/foo node script.js");
+        assert_eq!(result, vec!["node script.js"]);
+    }
+
+    #[test]
+    fn test_env_prefix_stripped_lc_all() {
+        let result = decompose_command("LC_ALL=C sort file.txt");
+        assert_eq!(result, vec!["sort file.txt"]);
+    }
+
+    #[test]
+    fn test_env_prefix_stripped_lowercase() {
+        // Lowercase env prefix is also stripped (AST-structural, not policy)
+        let result = decompose_command("foo=bar node script.js");
+        assert_eq!(result, vec!["node script.js"]);
+    }
+
+    #[test]
+    fn test_env_prefix_multiple_assignments() {
+        // Multiple env prefixes should all be stripped
+        let result = decompose_command("FOO=1 BAR=2 python3 test.py");
+        assert_eq!(result, vec!["python3 test.py"]);
+    }
+
+    #[test]
+    fn test_bare_assignment_no_command() {
+        // Bare assignment with no command: the parser treats it as the command name
+        // (word_or_name), not as a prefix AssignmentWord. The deny rule for bare
+        // assignments catches this on the raw string before decomposition.
+        let result = decompose_command("FOO=bar");
+        assert_eq!(result, vec!["FOO=bar"]);
     }
 }

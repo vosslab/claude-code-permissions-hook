@@ -112,9 +112,13 @@ fn check_rule(rule: &Rule, input: &HookInput) -> Option<String> {
             }
         }
         "Task" | "Agent" => {
-            if let Some(subagent_type) = input.extract_field("subagent_type")
-                && check_subagent_type(rule, &subagent_type)
-            {
+            // Missing subagent_type: no match, falls through to passthrough.
+            // This is fail-closed behavior -- unnamed agents require user approval.
+            let subagent_type = match input.extract_field("subagent_type") {
+                Some(st) => st,
+                None => return None,
+            };
+            if check_subagent_type(rule, &subagent_type) {
                 return Some(format!(
                     "Matched rule for {} with subagent_type: {}",
                     input.tool_name, subagent_type
@@ -547,6 +551,36 @@ mod tests {
 
         assert!(check_subagent_type(&rule, "codebase-analyzer"));
         assert!(!check_subagent_type(&rule, "other-agent"));
+    }
+
+    #[test]
+    fn test_agent_missing_subagent_type_fails_closed() {
+        let rule = Rule {
+            tool: "Agent".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: Some(Regex::new(r"^general-purpose$").unwrap()),
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+        };
+        // Agent input with NO subagent_type field -- should NOT match (fail closed)
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Agent".to_string(),
+            tool_input: serde_json::json!({"prompt": "do something", "description": "test"}),
+        };
+        let result = check_rule(&rule, &input);
+        // Missing subagent_type should not match any rule -- falls to passthrough
+        assert!(result.is_none());
     }
 
     #[test]

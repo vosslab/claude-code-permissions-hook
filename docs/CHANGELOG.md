@@ -1,5 +1,118 @@
 # Changelog
 
+## 2026-03-26
+
+### Additions and New Features
+
+- **TOML trust model restructure**: separated "can execute code" from "can change the
+  machine". `JS_CMDS` removed; runtimes moved out of `SAFE_CMDS` into new
+  `LOCAL_RUNTIMES = "node|deno"` with constrained allow patterns (.js/.mjs/.cjs files,
+  syntax checks, local deno subcommands). npx deliberately excluded -- passthroughs to
+  user prompt since it may fetch remote packages
+- **Rust decomposer: strip env-var prefixes from leaf commands** (`src/decomposer.rs`).
+  `NODE_PATH=/foo node script.js` now decomposes to `node script.js`. Eliminates
+  duplicate env-prefixed TOML allow rules and prevents env-prefix back doors. Uses
+  AST-structural `AssignmentWord` detection, not regex. Also extracts `$()` from
+  stripped assignment values so inner commands still get rule-checked
+- **Rust matcher: missing subagent\_type fails closed** (`src/matcher.rs`). Agent tool
+  calls without `subagent_type` now pass through to user prompt instead of silently
+  defaulting to "general-purpose"
+- **Agent allow rule**: replaced hardcoded list of 20+ agent names with broad pattern
+  `^[a-zA-Z][a-zA-Z0-9_:-]*$`. New agents in `~/.claude/agents/` are auto-allowed
+  without TOML changes. Documented two-layer permission model (hook gates launch,
+  agent .md specs constrain tools)
+- 7 new deny-and-steer rules: sudo, git reset --hard, git push --force (including
+  --force-with-lease), deno run with URLs, curl/wget piped to runtime, Write to
+  system dirs, Edit to system dirs
+- Added `reason` steering to 4 existing deny rules that lacked guidance: rm, .env
+  reads, git commit, git stash. Every deny rule now has a reason field
+- `HOME_PATH` tightened from `^$HOME/(nsh|\.)?` (matched all of home) to
+  `^$HOME/(nsh(/|$)|\.[^/]+(/|$))` (nsh + top-level dotdirs only)
+- `NSH_PATH` tightened from `^$HOME/nsh` to `^$HOME/nsh(/|$)` to match both the
+  directory itself and its contents
+- Added passthrough gap fixes: bare relative-path .py/.sh scripts without `./` prefix
+  (e.g. `tools/runner.py`) now match allow rules
+- `open`, `which`, `type` added to `FS_CMDS`; `find` removed (has deny-and-steer rule)
+- Improved section comments across all TOML rule groups documenting trust rationale
+- Updated [docs/CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) and
+  [docs/configuration-guide.md](configuration-guide.md) with new trust model
+
+### Behavior or Interface Changes
+
+- deno eval no longer auto-allowed; falls through to passthrough (user prompted)
+- npm install, pip install, git rebase intentionally left as passthrough (not denied)
+  so user can approve legitimate uses
+- Bare assignment deny message updated from TOML-internal language to user-friendly
+  "no command after assignment" steering
+
+### Decisions and Failures
+
+- Trust model philosophy: "allow routine local work, deny/steer on machine-changing
+  actions, prompt on high-impact operations"
+- npx kept as passthrough (not hard deny) because some npx usage is reasonable and
+  not every npx use has an MCP substitute
+- Env-var prefix stripping done unconditionally (AST-structural) rather than
+  uppercase-only, per user guidance: decomposer should be syntax-level, not
+  policy-opinionated
+- LOCAL_RUNTIMES kept narrow (node|deno only); will grow from passthrough log
+  evidence, not in advance
+
+### Developer Tests and Notes
+
+- Added 5 decomposer tests for env-var stripping: uppercase, lowercase, LC_ALL,
+  multiple assignments, bare assignment
+- Updated matcher test `test_agent_missing_subagent_type_fails_closed` (was
+  `test_agent_missing_subagent_type_defaults_to_general_purpose`)
+- All 63 tests pass (34 decomposer + 16 matcher + 13 integration)
+
+### Previous entries for 2026-03-26
+
+- Updated [docs/CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) to reflect
+  restructured permissions model: added trust model philosophy, env-var assignment
+  decomposer behavior, new "Local runtimes" section with node/deno/npx details,
+  npm read-only commands, expanded denied commands (sudo, git reset --hard,
+  git push --force, deno run URLs, curl/wget piped to runtime, Write/Edit to
+  system directories). Replaced hardcoded agent list with regex pattern. Split
+  passthrough section into "user approval" (npm install, pip install, git rebase,
+  deno eval) and "interactive tools" (worktree, cron, dialogs). Added bare
+  relative-path scripts to shell scripts section (tools/runner.py, scripts/build.sh).
+  Updated file access zones table to clarify Read paths (~/nsh/ vs full home).
+  Removed env-prefixed commands subsection (handled by decomposer)
+
+### Additions and New Features (continued)
+
+- Added `JS_CMDS` variable group (`node|deno|npx`) to production TOML and merged
+  into `SAFE_CMDS`. Eliminates 6 node + 2 deno Bash passthroughs from laptop log
+  and 9 node + 3 npx passthroughs from studio log
+- Added npm read-only allow rule for `npm list|root|ls|show|view|info|search|
+  outdated|doctor|prefix|version|--version`. npm install/uninstall remains as
+  passthrough for user permission
+- **Rust: normalize missing Agent subagent\_type to "general-purpose"**: When the
+  `subagent_type` field is absent from Agent tool input JSON, the matcher now
+  treats it as `"general-purpose"` (Claude Code's documented default) before
+  matching against `subagent_type_regex`. Eliminates 6 Agent passthroughs. Added
+  unit test `test_agent_missing_subagent_type_defaults_to_general_purpose`
+- Updated `improve_prompt.txt` with JSONL format note and guiding principle about
+  allowing reasonable requests
+
+### Fixes and Maintenance
+
+- Fixed `NSH_PATH` variable from `^$HOME/nsh/` to `^$HOME/nsh` to match paths
+  without trailing slash (e.g., Glob/Grep with `path=/Users/vosslab/nsh`).
+  Eliminates ~15 Glob/Grep passthroughs
+
+### Decisions and Failures
+
+- Passthrough log assessment (2026-03-26): 323 entries (laptop) + 25 entries
+  (studio). 228/323 laptop entries (70%) are intentional passthroughs
+  (ExitPlanMode, AskUserQuestion, EnterPlanMode, worktree tools). Remaining 95
+  addressed by 5 changes in this changeset
+- npx added to SAFE\_CMDS after discussion: downloads to ~/.cache (user-space),
+  risk comparable to node. npm install kept as passthrough for user approval
+- Decomposer investigation: chained command passthroughs (git check-ignore,
+  which, source && python | head) were caused by missing allow rules at the time,
+  not decomposer bugs. Decomposer correctly strips redirects and splits chains
+
 ## 2026-03-13
 
 ### Additions and New Features

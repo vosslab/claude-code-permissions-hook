@@ -70,6 +70,12 @@ file_path_exclude_regex = "\\.\\."  # Block ../ sequences
 
 The Bash tool executes shell commands. The hook extracts the `command` field.
 
+**Decomposer normalization:** Before matching, compound commands are split into
+leaf sub-commands (`&&`, `||`, `;`, pipes). Env-var assignments in command prefixes
+(e.g. `NODE_PATH=/foo`) are stripped from leaves, so `NODE_PATH=/foo node script.js`
+is matched as `node script.js`. This means you do not need separate env-prefixed
+allow rules -- one rule per command shape is sufficient.
+
 **Available fields:**
 | Field | Description |
 |-------|-------------|
@@ -127,51 +133,54 @@ command_exclude_regex = "&|;|\\||`|\\$\\(|>"  # Block shell metacharacters
 }
 ```
 
-### Agent Tool: Task
+### Agent/Task tool
 
-The Task tool spawns subagents. The hook can match on `subagent_type` or `prompt`.
+The Agent and Task tools spawn subagents. The hook can match on `subagent_type`
+or `prompt`. Both tool names are handled identically.
+
+**Two-layer permission model:**
+- Layer 1 (this hook): gates whether Claude may launch a given agent type
+- Layer 2 (agent .md specs in `~/.claude/agents/`): constrains what tools the
+  launched agent has access to
+
+**Missing subagent_type:** If the `subagent_type` field is absent from the tool
+input, the rule does not match (fail closed). The request falls through to
+passthrough so the user is prompted.
 
 **Available fields:**
 | Field | Description |
 |-------|-------------|
 | `subagent_type` | Exact match on the subagent type (not regex) |
+| `subagent_type_regex` | Regex match on the subagent type |
+| `subagent_type_exclude_regex` | Pattern that rejects the match if found |
 | `prompt_regex` | Pattern the prompt must match |
 | `prompt_exclude_regex` | Pattern that rejects the match if found |
 
-**Example: Allow specific agent types**
+**Example: Allow agents by name pattern (preferred over hardcoded lists)**
 ```toml
 [[allow]]
-tool = "Task"
-subagent_type = "Explore"
-
-[[allow]]
-tool = "Task"
-subagent_type = "codebase-analyzer"
+tool = "Agent"
+subagent_type_regex = "^[a-zA-Z][a-zA-Z0-9_:-]*$"
 ```
 
-**Example: Block general-purpose agents**
+This matches any valid agent name (e.g. `coder`, `Explore`, `superpowers:code-reviewer`)
+without requiring TOML updates when new agents are added.
+
+**Example: Allow specific agent types (exact match)**
 ```toml
-[[deny]]
-tool = "Task"
-subagent_type = "general-purpose"
+[[allow]]
+tool = "Agent"
+subagent_type = "Explore"
 ```
 
 **Example: Allow agents but filter prompts**
 ```toml
 [[allow]]
-tool = "Task"
-subagent_type = "Explore"
+tool = "Agent"
+subagent_type_regex = "^(Explore|Plan)$"
 prompt_regex = ".*"
 prompt_exclude_regex = "password|secret|credential"
 ```
-
-**Known subagent types** (may change between versions):
-- `general-purpose` - Full tool access
-- `Explore` - Codebase exploration
-- `Plan` - Architecture planning
-- `codebase-analyzer` - Code analysis
-- `codebase-locator` - File/component location
-- `statusline-setup` - Status line configuration
 
 **Tool input reference:**
 ```json

@@ -7,5 +7,9 @@ the claude-code-permissions-hook is a mature hook for claude, but we have been l
 
 Please look at the passthrough commands and give a report BEFORE exploring the codebase structure. I am looking for a report on the commands BEFORE any code changes should be considered.
 
+The passthrough log is JSONL (one JSON object per line, not a JSON array). Each line has fields: `timestamp`, `session_id`, `tool_name`, `tool_input`, `cwd`.
+
+The goal is to allow Claude all reasonable requests so it is not stalling and failing to meet its goals. We can also deny requests and steer Claude to a better direction.
+
 I keep my personal .toml file in
 /Users/vosslab/.config/claude-code-permissions-hook.toml -> /Users/vosslab/nsh/junk-drawer/CODEX/claude/claude-code-permissions-hook.toml
