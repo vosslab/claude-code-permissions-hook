@@ -4,12 +4,19 @@
 
 ### Additions and New Features
 
-- Added `tests/test_plan_mode_enforcement.sh`: standalone shell script that tests
-  whether Claude Code enforces plan mode at the runtime level. Invokes
-  `claude -p --permission-mode plan --dangerously-skip-permissions` and checks if
-  a temp file was edited. Confirms upstream bug (anthropics/claude-code#14570,
-  #19874) is present in v2.1.84. Exit codes: 0=PASS (fixed), 1=FAIL (bug present),
-  2=SKIP (setup issue)
+- Added Write/Edit allow rules for macOS per-user temp directory
+  (`^/var/folders/[^/]+/[^/]+/T/`). Previously only Read was allowed for
+  `/var/folders/`. The regex targets only the `T/` temp subdirectory, not
+  caches (`C/`) or other dirs. Fixes issue where `tempfile.gettempdir()` paths
+  were blocked for writes
+
+- Added `tools/test_plan_mode_enforcement.py`: two-phase A/B test for Claude Code
+  plan mode enforcement. Runs 4 prompt variants, each with a control phase (no
+  plan mode, must succeed) then plan mode phase (should be blocked). Verdict is
+  based on filesystem state (MD5), not Claude's text. A prompt is valid only if
+  its control edit succeeds. Uses `--effort low` for faster runs. Includes colored
+  terminal output and JSON response parsing for diagnostics. Confirms upstream bug
+  (anthropics/claude-code#14570, #19874). Exit codes: 0=PASS, 1=FAIL, 2=SKIP
 
 - **TOML trust model restructure**: separated "can execute code" from "can change the
   machine". `JS_CMDS` removed; runtimes moved out of `SAFE_CMDS` into new

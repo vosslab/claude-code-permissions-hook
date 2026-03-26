@@ -219,6 +219,20 @@ file_path_regex = "^(/private)?/tmp/"
 tool = "Edit"
 file_path_regex = "^(/private)?/tmp/"
 
+# macOS per-user temp dirs (/var/folders/XX/YY/T/) - screenshots, temp files, etc.
+# Scoped to the T/ temp subdirectory only, not caches (C/) or other dirs.
+[[allow]]
+tool = "Read"
+file_path_regex = "^/var/folders/[^/]+/[^/]+/T/"
+
+[[allow]]
+tool = "Write"
+file_path_regex = "^/var/folders/[^/]+/[^/]+/T/"
+
+[[allow]]
+tool = "Edit"
+file_path_regex = "^/var/folders/[^/]+/[^/]+/T/"
+
 # -------------------------------------------------------------------
 # Web tools
 # -------------------------------------------------------------------
