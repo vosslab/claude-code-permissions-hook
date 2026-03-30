@@ -50,6 +50,7 @@ individually.
 - [docs/USAGE.md](docs/USAGE.md): CLI reference, input/output format, examples
 - [docs/configuration-guide.md](docs/configuration-guide.md): rule syntax for each tool
 - [docs/tool-input-schemas.md](docs/tool-input-schemas.md): Claude Code tool input JSON reference
+- [docs/CLAUDE_HOOK_USAGE_GUIDE.md](docs/CLAUDE_HOOK_USAGE_GUIDE.md): allowed/denied patterns and alternatives for AI agents
 - [docs/CHANGELOG.md](docs/CHANGELOG.md): chronological record of changes
 - [example.toml](example.toml): starter config with deny/allow rules and variables
 
