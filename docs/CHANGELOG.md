@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-31
+
+### Additions and New Features
+
+- Added `update_rust.sh` script to update Rust toolchains via `rustup update`
+  and rustup itself via `brew upgrade rustup` (Homebrew-managed install)
+
 ## 2026-03-26
 
 ### Additions and New Features
