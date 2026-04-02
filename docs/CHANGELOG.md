@@ -6,6 +6,12 @@
 
 - Added deny rule for `perl` on `.pg` and `.pgml` files. PGML is not standard Perl;
   agents are steered to the `/webwork-writer` skill lint guide instead
+- Added allow rule for `launchctl` read-only queries (`list`, `print`, `blame`,
+  `dumpstate`, `dumpjpcategory`). Mutating subcommands (`load`, `unload`, `bootout`,
+  `kickstart`, `enable`, `disable`) still fall through to passthrough
+- Added allow rules for Read/Glob/Grep on `~/Library/LaunchAgents/` and
+  `~/Library/Logs/` for debugging launchd jobs. Write/Edit remain denied
+- Added allow rule for `mkdocs` local subcommands (`--version`, `build`, `serve`)
 
 ### Fixes and Maintenance
 
