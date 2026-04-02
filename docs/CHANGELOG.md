@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-04-02
+
+### Additions and New Features
+
+- Added deny rule for `perl` on `.pg` and `.pgml` files. PGML is not standard Perl;
+  agents are steered to the `/webwork-writer` skill lint guide instead
+
+### Fixes and Maintenance
+
+- Fixed Glob and Grep `/tmp` allow rules to match bare `/tmp` directory path (without
+  trailing slash). Previously `path: "/tmp"` fell through to passthrough because the
+  regex `^(/private)?/tmp/` required a trailing slash. Changed to `^(/private)?/tmp(/|$)`
+  for Glob and Grep only. Read/Write/Edit left unchanged since they operate on files,
+  not directories
+
 ## 2026-03-31
 
 ### Additions and New Features
