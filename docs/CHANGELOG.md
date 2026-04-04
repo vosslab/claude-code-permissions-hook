@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-04-04
+
+### Additions and New Features
+
+- Added `npx` allow rule with whitelisted packages (`tsc`, `eslint`, `prettier`).
+  Unknown npx packages still passthrough to user prompt. This eliminates ~86% of
+  Bash passthroughs from the passthrough log (132 of 154 were `npx tsc`)
+- Added allow rules for `eslint` and `prettier` as direct commands for linting
+  and formatting TypeScript/JavaScript projects
+- Added `npm run` allow rule for executing local `package.json` scripts
+  (`npm run build`, `npm run test`, etc.)
+- Added `node -e` / `node --eval` allow rule for quick inline JS evaluation
+  (e.g., JSON validation)
+
+### Fixes and Maintenance
+
+- Added `${NO_CMD_SUB}` (command substitution blocking) to all allow rules that
+  accept user-controlled arguments: `pytest`/`pyflakes`, `git` subcommands,
+  `launchctl`, `pip`/`brew`/`npm` read-only queries, and all four `rm` exception
+  rules (`git rm`, `rm /tmp/`, `rm *Cache*`, `rm _prefix`). Only `--version` and
+  `--check` rules (no meaningful arguments) were intentionally left without it
+- Updated `example.toml` to match: added `NO_CMD_SUB` to all rules that accept
+  arguments, added node/npx/eslint/prettier/deno/npm run/package manager rules
+
+### Decisions and Failures
+
+- Passthrough log assessment (296 entries): all commands were legitimate. The
+  sports-life-game TypeScript project generated 205/296 entries, mostly `npx tsc`
+  compilations. The whitelist approach for npx preserves security while allowing
+  routine dev tool usage
+
 ## 2026-04-02
 
 ### Additions and New Features

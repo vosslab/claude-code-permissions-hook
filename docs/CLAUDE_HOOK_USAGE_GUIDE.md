@@ -126,12 +126,32 @@ dedicated tools (Read, Grep, Glob) instead.
 
 **Node.js:**
 `node` is allowed for running `.js`, `.mjs`, and `.cjs` files, syntax checking with
-`-c` or `--check`, and `--version` queries.
+`-c` or `--check`, inline evaluation with `-e` or `--eval`, and `--version` queries.
 
 ```bash
 node script.js
 node -c script.js
+node -e "require('./data.json')"
 node --version
+```
+
+**npx (whitelisted packages):**
+`npx` is allowed for a whitelist of known-safe local dev tool packages: `tsc`,
+`eslint`, `prettier`. Unknown packages still require user approval (passthrough).
+
+```bash
+npx tsc --noEmit        # allowed
+npx eslint src/         # allowed
+npx prettier --check .  # allowed
+npx some-package        # requires approval
+```
+
+**eslint and prettier (direct):**
+`eslint` and `prettier` are allowed as direct commands for linting and formatting.
+
+```bash
+eslint src/app.ts
+prettier --write src/
 ```
 
 **Deno:**
@@ -147,14 +167,6 @@ deno test
 deno --version
 ```
 
-**npx:**
-`npx` requires user approval (passthrough) because it may fetch remote packages
-from npm. Use only when you have confirmed the package source.
-
-```bash
-npx some-package  # requires approval
-```
-
 ### File deletion (safe patterns)
 
 The `rm` command is denied by default, but these specific patterns are allowed:
@@ -166,14 +178,16 @@ The `rm` command is denied by default, but these specific patterns are allowed:
 | Cache directories | `rm -rf __pycache__`, `rm -r ~/Library/Caches/foo` |
 | `git rm` with relative paths | `git rm old_file.py` |
 
-### Package managers (read-only)
+### Package managers
 
 **pip read-only:**
 `pip show`, `pip list`, `pip freeze`, `pip check`
 
-**npm read-only:**
+**npm read-only and run:**
 `npm list`, `npm root`, `npm ls`, `npm show`, `npm view`, `npm info`, `npm search`,
 `npm outdated`, `npm doctor`, `npm prefix`, `npm version`, `npm --version`
+
+`npm run` is allowed for executing scripts defined in local `package.json`.
 
 **brew read-only:**
 `brew list`, `brew info`, `brew search`, `brew --prefix`
@@ -181,6 +195,7 @@ The `rm` command is denied by default, but these specific patterns are allowed:
 ```bash
 pip show numpy
 npm list --depth=0
+npm run build
 brew info python
 ```
 
@@ -421,7 +436,7 @@ useless.
 These commands intentionally require user approval (passthrough) because they have
 significant side effects or security implications:
 
-- **npx**: May fetch remote packages from npm registry
+- **npx (non-whitelisted)**: May fetch remote packages from npm registry
 - **npm install**: Modifies machine state, adds/updates dependencies
 - **pip install**: Modifies machine state, adds/updates Python packages
 - **git rebase**: Rewrites repository history

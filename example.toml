@@ -104,6 +104,7 @@ reason = "Use 'git mv' for tracked files. If the file is untracked, use cp + rm 
 [[allow]]
 tool = "Bash"
 command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*_\\S+"
+command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
 # Bash: python tooling
@@ -117,6 +118,63 @@ command_exclude_regex = "${NO_CMD_SUB}"
 [[allow]]
 tool = "Bash"
 command_regex = "^(pytest|pyflakes)\\s"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: local runtimes (node, deno, npx whitelist)
+# -------------------------------------------------------------------
+
+# node running local JS files (.js, .mjs, .cjs)
+[[allow]]
+tool = "Bash"
+command_regex = "^node\\s+(-[a-zA-Z]+\\s+)*[A-Za-z0-9_./-]+\\.(js|mjs|cjs)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# node -c / --check for syntax checking (read-only, no injection vector)
+[[allow]]
+tool = "Bash"
+command_regex = "^node\\s+(-c|--check)\\s"
+
+# node -e / --eval for quick inline evaluation
+[[allow]]
+tool = "Bash"
+command_regex = "^node\\s+(-e|--eval)\\s"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# node --version (info only, no arguments)
+[[allow]]
+tool = "Bash"
+command_regex = "^node\\s+--version"
+
+# npx with known-safe local dev tool packages only.
+# Unknown packages still passthrough to user prompt.
+[[allow]]
+tool = "Bash"
+command_regex = "^npx\\s+(tsc|eslint|prettier)(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# eslint -- local code linter (read-only analysis)
+[[allow]]
+tool = "Bash"
+command_regex = "^eslint\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# prettier -- code formatter
+[[allow]]
+tool = "Bash"
+command_regex = "^prettier\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# deno subcommands for local development (not remote URLs)
+[[allow]]
+tool = "Bash"
+command_regex = "^deno\\s+(run|check|fmt|lint|test)\\b"
+command_exclude_regex = "https?://|${NO_CMD_SUB}"
+
+# deno --version (info only, no arguments)
+[[allow]]
+tool = "Bash"
+command_regex = "^deno\\s+--version"
 
 # -------------------------------------------------------------------
 # Bash: cargo commands (exclude destructive subcommands)
@@ -134,6 +192,7 @@ command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CM
 [[allow]]
 tool = "Bash"
 command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|checkout|diff|log|ls-files|ls-tree|mv|pull|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
 # Bash: run a shell script directly (with optional -n syntax check)
@@ -171,6 +230,31 @@ command_exclude_regex = "${NO_CMD_SUB}"
 [[allow]]
 tool = "Bash"
 command_regex = "^([A-Z_]+=[^ ]+\\s+)+(${SAFE_CMDS}|python3?|pytest|pyflakes)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: package managers (read-only queries)
+# -------------------------------------------------------------------
+
+[[allow]]
+tool = "Bash"
+command_regex = "^pip3?\\s+(show|list|freeze|check)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+[[allow]]
+tool = "Bash"
+command_regex = "^brew\\s+(list|info|search|--prefix)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+[[allow]]
+tool = "Bash"
+command_regex = "^npm\\s+(list|root|ls|show|view|info|search|outdated|doctor|prefix|version|--version)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# npm run -- executes scripts defined in local package.json
+[[allow]]
+tool = "Bash"
+command_regex = "^npm\\s+run\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
