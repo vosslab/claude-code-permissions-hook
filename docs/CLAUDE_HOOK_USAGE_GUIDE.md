@@ -137,13 +137,15 @@ node --version
 
 **npx (whitelisted packages):**
 `npx` is allowed for a whitelist of known-safe local dev tool packages: `tsc`,
-`eslint`, `prettier`. Unknown packages still require user approval (passthrough).
+`eslint`, `prettier`, `playwright`. Unknown packages still require user approval
+(passthrough).
 
 ```bash
-npx tsc --noEmit        # allowed
-npx eslint src/         # allowed
-npx prettier --check .  # allowed
-npx some-package        # requires approval
+npx tsc --noEmit              # allowed
+npx eslint src/               # allowed
+npx prettier --check .        # allowed
+npx playwright screenshot ... # allowed
+npx some-package              # requires approval
 ```
 
 **eslint and prettier (direct):**
@@ -173,7 +175,7 @@ The `rm` command is denied by default, but these specific patterns are allowed:
 
 | Pattern | Example |
 | --- | --- |
-| Underscore-prefixed files | `rm _temp.py`, `rm -f _scratch.sh` |
+| Underscore-prefixed files | `rm _temp.py`, `rm -f /path/to/_scratch.sh` |
 | `/tmp/` paths | `rm /tmp/test_output.json` |
 | Cache directories | `rm -rf __pycache__`, `rm -r ~/Library/Caches/foo` |
 | `git rm` with relative paths | `git rm old_file.py` |

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-04-05
+
+### Fixes and Maintenance
+
+- Fixed rm underscore-prefix regex to match full paths (e.g.,
+  `rm -f /path/to/dir/_test_file.ts`). Previously only matched when the filename
+  argument started with `_`, not when `_` appeared after a path separator.
+  Updated both the deny exclude regex and the allow rule.
+- Added `playwright` to the npx whitelist for local browser testing
+  (screenshots, automation).
+
 ## 2026-04-04
 
 ### Additions and New Features
