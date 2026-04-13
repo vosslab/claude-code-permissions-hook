@@ -2,6 +2,13 @@
 
 ## 2026-04-13
 
+### Build/Tooling
+
+- `config_test.sh`: after a successful build/test/validate, remove
+  `target/debug` and the release `deps`/`build`/`incremental`/rlib scratch,
+  keeping only the 3.6M release binary. Shrinks `target/` from ~666M to ~4M.
+  Uses `set -e` and `git rev-parse --show-toplevel` for REPO_ROOT.
+
 ### Additions and New Features
 
 - Added `pdftotext` to `FILE_CMDS` safe-utility group. Read-only PDF-to-text
