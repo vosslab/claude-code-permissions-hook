@@ -104,8 +104,8 @@ These commands are allowed as single commands. Command substitution is blocked.
 
 **File and text processing:**
 `awk`, `cat`, `colordiff`, `comm`, `cut`, `diff`, `expand`, `file`, `fmt`, `fold`,
-`grep`, `head`, `jq`, `mediainfo`, `nl`, `od`, `paste`, `rg`, `sed`, `seq`, `shuf`,
-`sort`, `tac`, `tail`, `tee`, `tr`, `unexpand`, `uniq`, `wc`, `xargs`
+`grep`, `head`, `jq`, `mediainfo`, `nl`, `od`, `paste`, `pdftotext`, `rg`, `sed`,
+`seq`, `shuf`, `sort`, `tac`, `tail`, `tee`, `tr`, `unexpand`, `uniq`, `wc`, `xargs`
 
 **Filesystem navigation:**
 `basename`, `cd`, `chmod`, `cp`, `dirname`, `du`, `df`, `ls`, `lsof`, `mkdir`,
@@ -137,16 +137,23 @@ node --version
 
 **npx (whitelisted packages):**
 `npx` is allowed for a whitelist of known-safe local dev tool packages: `tsc`,
-`eslint`, `prettier`, `playwright`. Unknown packages still require user approval
-(passthrough).
+`eslint`, `prettier`, `playwright`, `esbuild`. Unknown packages still require
+user approval (passthrough).
 
 ```bash
 npx tsc --noEmit              # allowed
 npx eslint src/               # allowed
 npx prettier --check .        # allowed
 npx playwright screenshot ... # allowed
+npx esbuild src/x.ts          # allowed
 npx some-package              # requires approval
 ```
+
+If `npx tsc` fails because TypeScript is not installed, stop and tell the user
+to run `npm install --save-dev typescript` (or `npm install -g typescript` for
+a global install). Do not work around the failure by calling
+`./node_modules/.bin/tsc` or `node_modules/typescript/bin/tsc` directly --
+those paths are denied (see "Denied commands" below).
 
 **eslint and prettier (direct):**
 `eslint` and `prettier` are allowed as direct commands for linting and formatting.
@@ -168,6 +175,36 @@ deno lint
 deno test
 deno --version
 ```
+
+### Podman (containers)
+
+Read-only inspection, build, compose, lifecycle, and exec are allowed:
+
+```bash
+podman ps
+podman pod ls
+podman images
+podman logs web
+podman inspect web
+podman info
+podman build -t foo .
+podman compose up -d
+podman compose down
+podman start web
+podman stop web
+podman restart web
+podman exec web ls /var/www
+podman exec web cat /etc/hostname
+```
+
+Destructive operations are denied: `podman rm -f`, `podman rmi -f`,
+`podman kill`, `podman stop -t 0`, `podman system prune`,
+`podman volume rm|prune`, `podman network rm|prune`, `podman image rm|prune`.
+Ask the user to run these manually if truly needed.
+
+Note: arguments to `podman exec` are not re-decomposed by the hook, so a
+destructive shell inside a container (`podman exec web rm -rf /tmp/x`) is not
+blocked. Destructive behavior inside a container is a container-level concern.
 
 ### File deletion (safe patterns)
 
@@ -287,6 +324,29 @@ is still allowed.
 
 **Instead:** Use `Read(file_path='file.txt', offset=10, limit=11)`.
 Other sed operations (substitution, etc.) are allowed.
+
+### `tsc` via `node_modules` paths
+
+**Blocked:** `./node_modules/.bin/tsc`, `./node_modules/typescript/bin/tsc`,
+`/abs/path/node_modules/typescript/bin/tsc`,
+`node node_modules/typescript/bin/tsc`
+
+**Why:** Project-local `tsc` paths are a workaround for `npx tsc` failing.
+Retrying different invocation forms wastes turns and masks missing installs.
+
+**Instead:** Use `npx tsc` (whitelisted). If `npx tsc` fails because TypeScript
+is not installed, run exactly one of these two commands (both are whitelisted):
+
+```bash
+npm install --save-dev typescript   # allowed
+npm install -g typescript           # allowed
+```
+
+Any other `npm install` variation (different flags, version pins, extra
+packages, bare `npm install`) still passes through for user approval.
+
+Do not work around the failure with absolute paths, `node node_modules/...`,
+or `source source_me.sh &&` chains.
 
 ### `perl` on `.pg`/`.pgml` files
 

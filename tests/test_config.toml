@@ -7,7 +7,7 @@ audit_level = "off"
 passthrough_log_file = "/tmp/claude-test-passthrough.json"
 
 [variables]
-FILE_CMDS = "awk|cat|colordiff|comm|cut|diff|expand|file|fmt|fold|grep|head|join|nl|od|paste|rg|sed|seq|shuf|sort|tac|tail|tee|tr|unexpand|uniq|wc|xargs"
+FILE_CMDS = "awk|cat|colordiff|comm|cut|diff|expand|file|fmt|fold|grep|head|join|nl|od|paste|pdftotext|rg|sed|seq|shuf|sort|tac|tail|tee|tr|unexpand|uniq|wc|xargs"
 FS_CMDS = "basename|chmod|cp|dirname|du|df|find|ls|mkdir|mktemp|readlink|realpath|stat|touch"
 SYS_CMDS = "date|done|du|echo|env|export|expr|false|for|id|nproc|numfmt|printenv|printf|pwd|sleep|sort|source|test|timeout|true|tty|uname|which|whoami"
 SAFE_CMDS = "${FILE_CMDS}|${FS_CMDS}|${SYS_CMDS}"
@@ -86,6 +86,18 @@ tool = "Bash"
 command_regex = "^sed\\s+-n\\b"
 reason = "Use the Read tool with offset and limit parameters instead of sed -n for extracting line ranges."
 
+# Deny destructive podman operations
+[[deny]]
+tool = "Bash"
+command_regex = "^podman\\s+(rm\\s+-f|rmi\\s+-f|kill|stop\\s+-t\\s*0|system\\s+prune|volume\\s+(rm|prune)|network\\s+(rm|prune)|image\\s+(rm|prune))\\b"
+reason = "Destructive podman operations are restricted. Ask the user."
+
+# Deny direct tsc via node_modules paths -- steer to 'npx tsc'
+[[deny]]
+tool = "Bash"
+command_regex = "\\bnode_modules/(\\.bin|typescript/bin)/tsc\\b"
+reason = "Use 'npx tsc' instead of calling tsc via node_modules paths. If 'npx tsc' fails because TypeScript is not installed, stop and tell the user: 'Please run: npm install --save-dev typescript'."
+
 # Deny hardcoded homebrew python -c (inline code)
 [[deny]]
 tool = "Bash"
@@ -143,6 +155,24 @@ file_path_exclude_regex = "\\.\\."
 [[allow]]
 tool = "Bash"
 command_regex = "^cargo (build|test|check|clippy|fmt|run)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow npx with whitelisted local dev tool packages
+[[allow]]
+tool = "Bash"
+command_regex = "^npx\\s+(tsc|eslint|prettier|playwright|esbuild)(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow podman read-only inspection, build, compose, exec
+[[allow]]
+tool = "Bash"
+command_regex = "^podman\\s+(ps|pod|images|image\\s+ls|logs|inspect|info|version|port|top|stats|history|diff|build|compose|start|stop|restart|pull|tag|cp|exec)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow the exact 'npm install typescript' commands recommended by the tsc steering deny
+[[allow]]
+tool = "Bash"
+command_regex = "^npm\\s+install\\s+(--save-dev|-g)\\s+typescript\\s*$"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # Allow common shell utilities (narrow exclude: blocks command substitution only)

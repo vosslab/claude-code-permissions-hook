@@ -156,6 +156,158 @@ def test_cargo_disallowed_subcommands_passthrough(command: str) -> None:
 
 
 # ===================================================================
+# pdftotext - allowed safe utility (read-only PDF text extraction)
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"pdftotext file.pdf -",
+	"pdftotext -layout a.pdf b.txt",
+	"pdftotext /Users/korny/Dropbox/prj/doc.pdf -",
+])
+def test_pdftotext_allowed(command: str) -> None:
+	"""pdftotext is a read-only text extractor and should be allowed."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "allow", f"Expected allow for '{command}': {result}"
+
+
+# ===================================================================
+# npx whitelist - tsc, eslint, prettier, playwright, esbuild allowed
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"npx tsc --noEmit",
+	"npx tsc -p tsconfig.json --noEmit",
+	"npx eslint src/",
+	"npx prettier --check .",
+	"npx playwright screenshot http://localhost:3000 out.png",
+	"npx esbuild src/x.ts --bundle=false",
+	"npx esbuild --bundle entry.ts --outfile=out.js",
+])
+def test_npx_whitelist_allowed(command: str) -> None:
+	"""npx with whitelisted local build tools should be allowed."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "allow", f"Expected allow for '{command}': {result}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"npx create-react-app my-app",
+	"npx some-random-package",
+])
+def test_npx_non_whitelist_passthrough(command: str) -> None:
+	"""npx with non-whitelisted packages should passthrough for user approval."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "passthrough", f"Expected passthrough for '{command}': {result}"
+
+
+# ===================================================================
+# podman - read-only/build/compose/exec allowed; destructive denied
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"podman ps",
+	"podman ps -a",
+	"podman pod ls",
+	"podman images",
+	"podman image ls",
+	"podman logs web",
+	"podman inspect web",
+	"podman info",
+	"podman version",
+	"podman build -t foo .",
+	"podman compose up -d",
+	"podman compose down",
+	"podman exec web ls /var/www",
+	"podman exec web cat /etc/hostname",
+	"podman start web",
+	"podman stop web",
+	"podman restart web",
+])
+def test_podman_allowed(command: str) -> None:
+	"""Podman read-only, build, compose, lifecycle, and exec should be allowed."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "allow", f"Expected allow for '{command}': {result}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"podman rm -f web",
+	"podman rmi -f image:tag",
+	"podman kill web",
+	"podman stop -t 0 web",
+	"podman stop -t0 web",
+	"podman system prune",
+	"podman volume rm data",
+	"podman volume prune",
+	"podman network rm mynet",
+	"podman network prune",
+	"podman image rm image:tag",
+	"podman image prune",
+])
+def test_podman_destructive_denied(command: str) -> None:
+	"""Destructive podman operations should be denied."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "deny", f"Expected deny for '{command}': {result}"
+
+
+# ===================================================================
+# npm install typescript - narrow allow for the two exact forms the
+# tsc steering deny recommends; all other 'npm install' still passes through.
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"npm install --save-dev typescript",
+	"npm install -g typescript",
+	"npm install --save-dev typescript ",  # trailing whitespace
+])
+def test_npm_install_typescript_allowed(command: str) -> None:
+	"""The exact 'npm install typescript' forms from the tsc deny reason are allowed."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "allow", f"Expected allow for '{command}': {result}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"npm install typescript",  # missing --save-dev / -g
+	"npm install --save-dev typescript@5.0",  # version pin
+	"npm install --save-dev typescript eslint",  # extra package
+	"npm install -g typescript eslint",  # extra package
+	"npm install --save-dev @types/node",  # different package
+	"npm install react",  # unrelated package
+	"npm install",  # bare
+	"npm install --save typescript",  # wrong flag (--save not allowed)
+])
+def test_npm_install_other_passthrough(command: str) -> None:
+	"""All other 'npm install' variations should still passthrough for user approval."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "passthrough", f"Expected passthrough for '{command}': {result}"
+
+
+# ===================================================================
+# tsc steering - deny direct node_modules paths, point to 'npx tsc'
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"./node_modules/.bin/tsc --noEmit",
+	"./node_modules/typescript/bin/tsc -p tsconfig.json",
+	"/Users/vosslab/nsh/cell-culture-game-claude/node_modules/typescript/bin/tsc -p tsconfig.core.json --noEmit",
+	"node /Users/vosslab/nsh/cell-culture-game-claude/node_modules/typescript/bin/tsc -p tsconfig.core.json --noEmit",
+	"node_modules/typescript/bin/tsc --version",
+	"source source_me.sh && /abs/path/node_modules/typescript/bin/tsc --noEmit",
+])
+def test_tsc_node_modules_steering_denied(command: str) -> None:
+	"""Calling tsc via node_modules paths should be denied and steered to 'npx tsc'."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "deny", f"Expected deny for '{command}': {result}"
+	assert "npx tsc" in (result.get("reason") or ""), f"Expected steering reason for '{command}': {result}"
+
+
+# ===================================================================
 # Simple allowed commands - core utilities
 # ===================================================================
 

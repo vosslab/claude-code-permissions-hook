@@ -1,5 +1,60 @@
 # Changelog
 
+## 2026-04-13
+
+### Additions and New Features
+
+- Added `pdftotext` to `FILE_CMDS` safe-utility group. Read-only PDF-to-text
+  extractor appeared 6 times in the passthrough log for lecture material
+  extraction; no side effects, belongs with `awk`/`cat`/`jq`.
+- Added `esbuild` to the `npx` whitelist alongside `tsc`/`eslint`/`prettier`/
+  `playwright`. Same class of local-dev build tool; eliminates one
+  passthrough class.
+- Added `podman` allow rule for read-only inspection, build, compose,
+  lifecycle, and exec subcommands (`ps`, `pod`, `images`, `image ls`, `logs`,
+  `inspect`, `info`, `version`, `port`, `top`, `stats`, `history`, `diff`,
+  `build`, `compose`, `start`, `stop`, `restart`, `pull`, `tag`, `cp`,
+  `exec`). Covers a coherent 3vee-server debugging session that accounted
+  for 14 passthroughs.
+- Added matching `podman` deny rule for destructive operations: `rm -f`,
+  `rmi -f`, `kill`, `stop -t 0`, `system prune`, `volume rm|prune`,
+  `network rm|prune`, `image rm|prune`. Ask the user manually for these.
+- Added narrow allow for the exact `npm install` commands that the tsc
+  steering deny recommends: `npm install --save-dev typescript` and
+  `npm install -g typescript`. All other `npm install` variations (version
+  pins, extra packages, different flags) still passthrough for user
+  approval. Lets Claude self-remediate a missing TypeScript install without
+  opening the door to arbitrary package installation.
+- Added steering deny for `tsc` via `node_modules` paths (matches
+  `./node_modules/.bin/tsc`, `./node_modules/typescript/bin/tsc`, absolute
+  path forms, and `node node_modules/typescript/bin/tsc`). Redirects to
+  `npx tsc`; the passthrough log showed Claude retrying 6 invocation forms
+  (9 calls total) in one TypeScript session, which is a workaround pattern
+  we want to surface as a real "install TypeScript" problem instead.
+
+### Documentation
+
+- Updated [docs/CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md):
+  added `pdftotext` to safe utilities, added `esbuild` to the npx whitelist
+  section, added a new "Podman (containers)" section under Allowed commands,
+  added a new "`tsc` via `node_modules` paths" entry under Denied commands.
+
+### Tests
+
+- Mirrored the four new rules into
+  [tests/test_config.toml](../tests/test_config.toml) so they are covered by
+  integration tests.
+- Added 47 parametrized cases in
+  [tests/test_hook.py](../tests/test_hook.py):
+  `test_pdftotext_allowed` (3),
+  `test_npx_whitelist_allowed` (7),
+  `test_npx_non_whitelist_passthrough` (2),
+  `test_podman_allowed` (17),
+  `test_podman_destructive_denied` (12),
+  `test_tsc_node_modules_steering_denied` (6, including a
+  `source source_me.sh &&` compound variant and a reason-message assertion).
+  Full suite: 621 passed (up from 574). Pyflakes lint: 18 passed.
+
 ## 2026-04-05
 
 ### Fixes and Maintenance
