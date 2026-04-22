@@ -175,6 +175,18 @@ tool = "Bash"
 command_regex = "^npm\\s+install\\s+(--save-dev|-g)\\s+typescript\\s*$"
 command_exclude_regex = "${NO_CMD_SUB}"
 
+# Allow git read-only subcommands (matches production .toml git allowlist)
+[[allow]]
+tool = "Bash"
+command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|check-ignore|checkout|diff|grep|ls-files|ls-tree|log|mv|pull|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow pip/python -m pip read-only info queries
+[[allow]]
+tool = "Bash"
+command_regex = "^(pip3?|python3?\\s+-m\\s+pip)\\s+(show|list|freeze|check)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
 # Allow common shell utilities (narrow exclude: blocks command substitution only)
 [[allow]]
 tool = "Bash"

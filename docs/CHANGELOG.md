@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-04-22
+
+### Additions and New Features
+
+- Added `grep` to the git allowlist (line 418 of the production `.toml`).
+  `git grep` is inherently read-only -- no write mode exists -- and the
+  2026-04-22 passthrough log showed 8 of 16 Bash passthroughs were
+  `git grep` invocations (both in-tree and `--no-index` absolute-path
+  forms) during a rename refactor. Covers `git grep ...`,
+  `git grep --no-index ...`, and `git -C <dir> grep ...`. The existing
+  `${NO_CMD_SUB}` exclude still blocks command substitution.
+- Extended the pip info allow rule to cover `python -m pip` invocation.
+  Old regex `^pip3?\s+(show|list|freeze|check)` only matched bare
+  `pip`/`pip3`; new regex
+  `^(pip3?|python3?\s+-m\s+pip)\s+(show|list|freeze|check)` also matches
+  `python -m pip show`, `python3 -m pip list`, etc. The `python -m pip`
+  form is the pip team's officially recommended invocation and is
+  functionally different from bare `pip` (it pins to a specific
+  interpreter), so an allow (not a steering deny) is the right fit.
+  `pip install` and `pip uninstall` still passthrough.
+
+### Tests
+
+- Mirrored both rules into
+  [tests/test_config.toml](../tests/test_config.toml) so integration
+  tests exercise them.
+- Added 23 parametrized cases in
+  [tests/test_hook.py](../tests/test_hook.py):
+  `test_git_grep_allowed` (8), `test_git_grep_command_substitution_blocked`
+  (2), `test_python_m_pip_info_allowed` (8),
+  `test_pip_install_passthrough` (5 regression cases covering
+  install/uninstall across `pip`, `pip3`, `python -m pip`, `python3 -m pip`).
+  Full suite: 655 passed (up from 621 after the 2026-04-13 additions +
+  prior growth). Pyflakes lint: 18 passed.
+
 ## 2026-04-13
 
 ### Build/Tooling

@@ -2243,3 +2243,75 @@ def test_sed_substitute_not_denied(command: str) -> None:
 	result = run_hook("Bash", {"command": command})
 	assert result["decision"] != "deny", \
 		f"Expected non-deny for sed substitution: '{command}': {result}"
+
+
+# ===================================================================
+# git grep - read-only search, allowed in all forms (in-tree,
+# --no-index with absolute paths, and git -C <dir> grep)
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"git grep -n foo",
+	"git grep -nE 'a|b' path/",
+	"git grep -nE 'debug_tracks|DEBUG_TRACKS' track_runner/ tools/ tests/",
+	"git grep -nE 'foo' -- track_runner/ tools/",
+	"git grep --no-index -nE 'x' /Users/vosslab/abs/path",
+	"git grep --no-index -nE 'a|b' /tmp/foo /tmp/bar",
+	"git -C /tmp grep foo",
+	"git -C /Users/vosslab/proj grep --no-index -n bar /tmp/x",
+])
+def test_git_grep_allowed(command: str) -> None:
+	"""git grep is inherently read-only; all forms should be allowed."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "allow", f"Expected allow for '{command}': {result}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"git grep \"$(whoami)\"",
+	"git grep `id`",
+])
+def test_git_grep_command_substitution_blocked(command: str) -> None:
+	"""git grep with command substitution should not be allowed (NO_CMD_SUB exclude)."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] != "allow", \
+		f"Expected non-allow for git grep with cmd-sub: '{command}': {result}"
+
+
+# ===================================================================
+# python -m pip info - read-only pip info queries invoked via
+# `python -m pip` / `python3 -m pip` should be allowed (same safety
+# class as plain `pip show`)
+# ===================================================================
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"pip show pytest-qt",
+	"pip3 show pytest-qt",
+	"python -m pip show pytest-qt",
+	"python3 -m pip show pytest-qt",
+	"python -m pip list",
+	"python3 -m pip list",
+	"python3 -m pip freeze",
+	"python -m pip check",
+])
+def test_python_m_pip_info_allowed(command: str) -> None:
+	"""pip / python -m pip read-only info queries should be allowed."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "allow", f"Expected allow for '{command}': {result}"
+
+
+#============================================
+@pytest.mark.parametrize("command", [
+	"pip install foo",
+	"pip3 install foo",
+	"python -m pip install foo",
+	"python3 -m pip install foo",
+	"python3 -m pip uninstall foo",
+])
+def test_pip_install_passthrough(command: str) -> None:
+	"""pip install/uninstall must still passthrough (not matched by info rule)."""
+	result = run_hook("Bash", {"command": command})
+	assert result["decision"] == "passthrough", \
+		f"Expected passthrough for '{command}': {result}"
