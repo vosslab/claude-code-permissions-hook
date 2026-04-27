@@ -1,0 +1,45 @@
+# Hook decision fixtures for the LIVE config at
+# ~/.config/claude-code-permissions-hook.toml.
+# Format: <expected>\t<command>
+# expected = allow | deny | passthrough
+# Lines starting with # and blank lines are skipped.
+# Add new cases anywhere; runner is tests/run_command_decisions.sh.
+
+# --- ffprobe steering (deny by default, allow only mediainfo-cannot-do flags) ---
+allow	ffprobe -show_chapters /tmp/x.m4b
+allow	ffprobe -show_packets /tmp/x.m4b
+allow	ffprobe -show_frames /tmp/x.m4b
+allow	ffprobe -f lavfi -i sine=440
+deny	ffprobe -show_streams /tmp/x.m4b
+deny	ffprobe -i /tmp/x.mp3
+deny	ffprobe /tmp/x.m4b
+
+# --- mediainfo (preferred metadata tool) ---
+allow	mediainfo --Output=JSON /tmp/x.m4b
+allow	mediainfo /tmp/x.m4b
+
+# --- ffmpeg / sox scoped to /tmp scratch dirs ---
+allow	ffmpeg -y -f lavfi -i sine=440 /tmp/test.m4a
+allow	ffmpeg -i /tmp/in.wav /tmp/out.wav
+allow	sox /tmp/test_spike.wav -n trim 0 20 stat
+allow	sox /tmp/in.wav /tmp/out.wav
+passthrough	ffmpeg -i /tmp/in.wav /Users/vosslab/out.wav
+passthrough	sox /etc/passwd -n stat
+passthrough	ffmpeg -i in.wav out.wav
+allow	convert /tmp/in.png /tmp/out.jpg
+allow	magick /tmp/a.png -resize 50% /tmp/b.png
+allow	tesseract /tmp/scan.png /tmp/out
+allow	qpdf --linearize /tmp/in.pdf /tmp/out.pdf
+allow	gs -o /tmp/out.pdf -sDEVICE=pdfwrite /tmp/in.pdf
+passthrough	convert /Users/vosslab/foo.png /tmp/out.jpg
+passthrough	tesseract scan.png out
+
+# --- rm exceptions (existing rules, regression coverage) ---
+allow	rm /tmp/scratch.txt
+allow	rm -rf /tmp/build
+allow	git rm src/foo.py
+deny	rm /Users/vosslab/important.txt
+deny	rm -rf /
+
+# --- bare mv denied; git mv allowed via separate rule path ---
+deny	mv a.txt b.txt

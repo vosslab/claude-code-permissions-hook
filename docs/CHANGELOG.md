@@ -10,6 +10,20 @@
 - Added `./bin/<name>` and `./bin/<name>.exe` to the local-executable allow
   rules so project-shipped compiled tools (e.g. `./bin/Volume.exe`) run without
   user approval.
+- Added `ffprobe` deny rule with steering message pointing Claude to
+  `mediainfo --Output=JSON`, with an exclude/allow pair that keeps
+  `ffprobe -show_chapters`, `-show_packets`, `-show_frames`, and
+  `-f lavfi` available (the cases mediainfo cannot handle). Driven by a
+  passthrough-log review.
+- Added `TMP_SCOPED_CMDS` variable (`ffmpeg|sox` to start) and a single
+  generic allow rule that grants any tool in the group when the leaf only
+  touches `/tmp` or `/private/tmp`. Backed by a `NON_TMP_ROOTS` denylist
+  variable (`Users|home|usr|etc|opt|var|bin|...`) reused in the exclude.
+  Adding a new tmp-scoped tool is a one-token edit to `TMP_SCOPED_CMDS`.
+- Added `tests/command_decisions.tsv` (fixture) and
+  `tests/run_command_decisions.sh` (runner) for iteratively building up
+  expected-decision coverage against the live config. Wired into
+  `config_test.sh`.
 
 ### Behavior or Interface Changes
 

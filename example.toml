@@ -32,6 +32,12 @@ SYS_CMDS = "curl|date|echo|env|export|expr|false|id|nproc|numfmt|printenv|printf
 DEV_CMDS = "bandit|make|pyflakes"
 # Merged safe commands -- harmless utilities only, NO runtimes
 SAFE_CMDS = "${TEXT_CMDS}|${SEARCH_CMDS}|${FORMAT_CMDS}|${INSPECT_CMDS}|${CHECKSUM_CMDS}|${FS_CMDS}|${PROC_CMDS}|${SYS_CMDS}|${DEV_CMDS}"
+# Tools that can write/read freely as long as every path stays under /tmp.
+# Used by the "tmp-scoped" allow rule below. Add new tools here.
+TMP_SCOPED_CMDS = "ffmpeg|sox|convert|magick|mogrify|gm|optipng|pngcrush|jpegoptim|cwebp|tesseract|qpdf|pdftk|gs|lame|flac"
+# Absolute-path roots that disqualify a tmp-scoped invocation.
+# Excludes /tmp and /private/tmp by construction (they are not in this list).
+NON_TMP_ROOTS = "Users|home|usr|etc|opt|var|bin|sbin|root|sys|proc|dev|Library|System|Applications|boot|mnt|media|nsh"
 
 # --- Local runtimes (can execute code, constrained allow patterns only) ---
 # npx: only whitelisted packages auto-allowed; unknown packages passthrough to user prompt.
@@ -261,6 +267,17 @@ tool = "Bash"
 command_regex = "^gh\\b"
 reason = "gh CLI is not installed. Do not use GitHub CLI commands."
 
+# --- Media tools steering ---
+
+# Steer ffprobe to mediainfo for the cases mediainfo handles cleanly.
+# ffprobe stays available for chapter atoms, packet/frame timing, and
+# lavfi/synthetic sources -- the cases mediainfo cannot do.
+[[deny]]
+tool = "Bash"
+command_regex = "^ffprobe(\\s|$)"
+command_exclude_regex = "(\\s|^)-show_(chapters|packets|frames)\\b|(\\s|^)-f\\s+lavfi\\b"
+reason = "Prefer 'mediainfo --Output=JSON <file>' for container, codec, and track metadata. ffprobe is allowed only with -show_chapters, -show_packets, -show_frames, or -f lavfi -- the cases mediainfo cannot handle."
+
 # --- Path scoping (blast radius control) ---
 
 # Deny writes to system directories
@@ -310,6 +327,25 @@ command_exclude_regex = "${NO_CMD_SUB}"
 tool = "Bash"
 command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*(\\S*/)?_\\S+"
 command_exclude_regex = "${NO_CMD_SUB}"
+
+# --- ffprobe: explicit allow for the four mediainfo-cannot-do flags ---
+# Paired with the ffprobe deny rule above. The deny's exclude lets these
+# pass; this allow makes them silent rather than passthrough.
+[[allow]]
+tool = "Bash"
+command_regex = "^ffprobe\\b.*((\\s)-show_(chapters|packets|frames)\\b|(\\s)-f\\s+lavfi\\b)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# --- Tools scoped to /tmp scratch dirs ---
+# Allow any tool listed in ${TMP_SCOPED_CMDS} when the leaf references
+# /tmp (or /private/tmp) and does not touch any non-scratch absolute root.
+# Virtual sources like `-f lavfi -i sine=...`, stdin `-`, or sox null
+# sink `-n` ride along because the rule still requires a real /tmp/ path
+# token in the leaf. Add new tools by editing TMP_SCOPED_CMDS above.
+[[allow]]
+tool = "Bash"
+command_regex = "^(${TMP_SCOPED_CMDS})\\b.*(\\s|=)(/private)?/tmp/"
+command_exclude_regex = "(\\s|^|=)/(${NON_TMP_ROOTS})\\b|${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
 # Bash: Python tooling

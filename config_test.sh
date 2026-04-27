@@ -10,6 +10,8 @@ cargo test
 "$BIN" validate --config ~/.config/claude-code-permissions-hook.toml
 
 echo ""
+"$REPO_ROOT/tests/run_command_decisions.sh"
+echo ""
 readlink "$HOME/.config/claude-code-permissions-hook.toml"
 echo ""
 
