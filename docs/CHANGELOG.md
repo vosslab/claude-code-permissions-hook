@@ -23,7 +23,16 @@
 - Added `tests/command_decisions.tsv` (fixture) and
   `tests/run_command_decisions.sh` (runner) for iteratively building up
   expected-decision coverage against the live config. Wired into
-  `config_test.sh`.
+  `config_test.sh`. Seeded with 93 regression cases drawn from
+  `docs/CLAUDE_HOOK_USAGE_GUIDE.md` (Python/git/cargo/npm/pip/podman/
+  rm/cat/grep/sed-n/find/sudo/gh/curl-pipe-bash/heredoc/bare-assignments)
+  plus the new ffprobe and tmp-scoped rules.
+- Mirrored `TMP_SCOPED_CMDS`, `NON_TMP_ROOTS`, the ffprobe deny+allow
+  pair, and the tmp-scoped allow rule into `example.toml` so the
+  reference config matches the live config.
+- Updated `docs/CLAUDE_HOOK_USAGE_GUIDE.md` with new sections for
+  "Tools scoped to /tmp scratch dirs" (allow) and "ffprobe (steered to
+  mediainfo)" (deny), plus two new rows in the common-patterns table.
 
 ### Behavior or Interface Changes
 

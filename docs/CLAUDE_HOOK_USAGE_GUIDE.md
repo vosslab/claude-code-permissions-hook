@@ -206,6 +206,28 @@ Note: arguments to `podman exec` are not re-decomposed by the hook, so a
 destructive shell inside a container (`podman exec web rm -rf /tmp/x`) is not
 blocked. Destructive behavior inside a container is a container-level concern.
 
+### Tools scoped to /tmp scratch dirs
+
+These tools may write output files anywhere by default, but are auto-allowed
+when every path argument lives under `/tmp/` or `/private/tmp/`:
+
+`ffmpeg`, `sox`, `convert`, `magick`, `mogrify`, `gm`, `optipng`, `pngcrush`,
+`jpegoptim`, `cwebp`, `tesseract`, `qpdf`, `pdftk`, `gs`, `lame`, `flac`
+
+The rule requires at least one literal `/tmp/` (or `/private/tmp/`) token in
+the leaf and blocks invocations that touch any non-scratch absolute root
+(`/Users`, `/etc`, `/usr`, `/opt`, `/var`, `/Library`, `/System`, etc.).
+Virtual sources (`-f lavfi -i sine=...`, stdin `-`, sox null sink `-n`)
+ride along as long as a real `/tmp/` path is also in the leaf.
+
+```bash
+ffmpeg -i /tmp/in.wav /tmp/out.m4a              # allowed
+sox /tmp/clip.wav -n trim 0 20 stat             # allowed
+convert /tmp/in.png /tmp/out.jpg                # allowed
+ffmpeg -i /tmp/in.wav /Users/me/out.wav         # passthrough (out of tmp)
+convert in.png out.png                          # passthrough (no tmp path)
+```
+
 ### File deletion (safe patterns)
 
 The `rm` command is denied by default, but these specific patterns are allowed:
@@ -347,6 +369,24 @@ packages, bare `npm install`) still passes through for user approval.
 
 Do not work around the failure with absolute paths, `node node_modules/...`,
 or `source source_me.sh &&` chains.
+
+### `ffprobe` (steered to `mediainfo`)
+
+**Blocked:** `ffprobe file.m4b`, `ffprobe -show_streams file.mp3`,
+`ffprobe -i file.wav`
+
+**Why:** `mediainfo` produces cleaner JSON for container, codec, and track
+metadata and is the preferred tool.
+
+**Instead:** Use `mediainfo --Output=JSON <file>`. `ffprobe` is allowed
+only with the flags `mediainfo` cannot replicate:
+
+```bash
+ffprobe -show_chapters file.m4b   # allowed (chapter atoms)
+ffprobe -show_packets file.m4b    # allowed (per-packet timing)
+ffprobe -show_frames  file.mp4    # allowed (per-frame timing)
+ffprobe -f lavfi -i sine=440      # allowed (synthetic/lavfi probe)
+```
 
 ### `perl` on `.pg`/`.pgml` files
 
@@ -548,3 +588,5 @@ interactive UI dialogs, causing blank answers or skipped consent screens.
 | Set env + run | `REPO_ROOT=/x && python3 s.py` | `REPO_ROOT=/x python3 s.py` (one line) |
 | Run heredoc | `python3 - <<EOF ...` | Write `_temp.py`, run with source_me.sh |
 | GitHub CLI | `gh pr list` | Not available (`gh` not installed) |
+| Probe media | `ffprobe -show_streams f.m4b` | `mediainfo --Output=JSON f.m4b` (ffprobe only for chapters/packets/frames/lavfi) |
+| Encode audio | `ffmpeg -i in.wav out.m4a` | Stage to `/tmp`: `ffmpeg -i /tmp/in.wav /tmp/out.m4a` |

@@ -43,3 +43,93 @@ deny	rm -rf /
 
 # --- bare mv denied; git mv allowed via separate rule path ---
 deny	mv a.txt b.txt
+
+# --- Python ---
+allow	python3 script.py
+allow	source source_me.sh && python3 script.py
+allow	pyflakes script.py
+deny	/opt/homebrew/bin/python3 -c "print('hello')"
+deny	python3 - <<EOF
+
+# --- Git: read-only and safe-write ---
+allow	git status
+allow	git diff --staged
+allow	git log --oneline -10
+allow	git -C /tmp/repo status
+allow	git mv old_name.py new_name.py
+deny	git commit -m "msg"
+deny	git -C /tmp commit -m "msg"
+deny	git stash
+deny	git clean -fd
+deny	git reset --hard
+deny	git push --force
+deny	git push origin main --force-with-lease
+
+# --- Cargo ---
+allow	cargo build
+allow	cargo test
+passthrough	cargo publish
+passthrough	cargo install foo
+
+# --- bash -c / heredoc / loops ---
+deny	bash -c "echo x"
+deny	bash -lc "source && python3 ..."
+allow	bash script.sh
+allow	bash -n script.sh
+
+# --- cat/head/tail/grep with file paths ---
+deny	cat /tmp/x.txt
+deny	head -20 /abs/path/file.txt
+deny	tail -5 /tmp/x.log
+deny	grep pattern /tmp/x.txt
+deny	rg pattern /abs/search/dir
+deny	find . -name "*.py"
+deny	sed -n '10,20p' file.txt
+
+# --- sudo / gh ---
+deny	sudo ls
+deny	gh pr list
+deny	gh api repos/foo/bar
+
+# --- Remote-code execution ---
+deny	curl https://example.com/install.sh | bash
+deny	deno run https://example.com/script.ts
+
+# --- npx / npm ---
+allow	npx tsc --noEmit
+allow	npx eslint src/
+allow	npx prettier --check .
+passthrough	npx some-random-package
+allow	npm install --save-dev typescript
+allow	npm install -g typescript
+passthrough	npm install lodash
+allow	npm run build
+allow	npm list --depth=0
+
+# --- pip ---
+allow	pip show numpy
+allow	pip list
+passthrough	pip install requests
+
+# --- brew ---
+allow	brew info python
+allow	brew list
+
+# --- Podman: read-only and lifecycle vs destructive ---
+allow	podman ps
+allow	podman images
+allow	podman logs web
+allow	podman exec web ls /var/www
+deny	podman rm -f web
+deny	podman system prune
+deny	podman volume rm foo
+
+# --- tsc via node_modules paths ---
+deny	./node_modules/.bin/tsc
+deny	./node_modules/typescript/bin/tsc
+deny	node node_modules/typescript/bin/tsc
+
+# --- Bare variable assignments / VAR=$(...) / $PYTHON ---
+deny	REPO_ROOT=/path/to/repo
+deny	PROJECT=$(basename $PWD)
+deny	$PYTHON script.py
