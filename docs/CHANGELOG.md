@@ -54,6 +54,19 @@
   trimmed-down 365-line subset that drifted out of sync with reality.
 - `config_test.sh`: 23 tests pass, both production and example configs
   validate.
+- Expanded `tests/command_decisions.tsv` from 93 to 268 regression cases,
+  adding coverage for safe utilities (awk/jq/sort/wc/date/pwd/uname/etc.),
+  the new `make`/`bandit`/`column`/`shasum`/`sha256sum`/`md5sum` allow rules,
+  pipeline forms of cat/head/tail/grep, file-path forms of the dedicated-tool
+  deny rules (incl. `egrep`/`fgrep`), `./bin/<name>(.exe)?` local-exec
+  patterns, more git/cargo/node/deno/eslint/prettier/podman/pip/npm/brew
+  cases, the `TMP_SCOPED_CMDS` group (optipng, jpegoptim, lame, flac,
+  pngcrush, cwebp, pdftk, gm, mogrify) plus mixed-root passthroughs,
+  rm-exception patterns, more heredoc/loop/`bash -c`/env-var denies,
+  ffprobe edge cases, and `perl` on PG/PGML. `tests/run_command_decisions.sh`
+  now evaluates every fixture against both the live config and
+  `example.toml`; Bash command rules are byte-identical between them, so
+  every row must produce the same decision on both.
 
 ## 2026-04-22
 
