@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-04-27
+
+### Additions and New Features
+
+- Added `make`, `bandit`, `column`, `shasum`, `sha256sum` to the safe-command
+  allowlist. Driven by a passthrough-log review showing these as common,
+  legitimate Claude requests that were stalling on user prompts.
+- Added `./bin/<name>` and `./bin/<name>.exe` to the local-executable allow
+  rules so project-shipped compiled tools (e.g. `./bin/Volume.exe`) run without
+  user approval.
+
+### Behavior or Interface Changes
+
+- Reorganized the long `FILE_CMDS` and `SYS_CMDS` variables into smaller
+  semantic groups: `TEXT_CMDS`, `SEARCH_CMDS`, `FORMAT_CMDS`, `INSPECT_CMDS`,
+  `CHECKSUM_CMDS`, `FS_CMDS`, `PROC_CMDS`, `SYS_CMDS`, and `DEV_CMDS`.
+  `SAFE_CMDS` now merges all of them. Naming makes the intent of each safe
+  utility group obvious.
+- Extended the grep file-path deny rule to also block `egrep` and `fgrep`
+  (both bare and absolute-path forms), steering Claude to the Grep tool.
+  `egrep`/`fgrep` are deprecated GNU aliases but still common in habit.
+
+### Fixes and Maintenance
+
+- `config_test.sh`: 23 tests pass, config validates with 90 rules
+  (31 deny, 59 allow).
+
 ## 2026-04-22
 
 ### Additions and New Features
