@@ -1,69 +1,188 @@
 [audit]
 audit_file = "/tmp/claude-tool-use.json"
-# Audit level: off, matched (default), all
-# - off: no auditing
-# - matched: audit only tool use that hits a rule (allow/deny)
-# - all: audit everything including passthrough
 audit_level = "matched"
-# Dedicated log for commands that matched neither allow nor deny rules.
-# Review this file to identify rule gaps and tighten your config.
 passthrough_log_file = "/tmp/claude-passthrough.json"
 
 [limits]
 # Deny Bash commands with more than this many chained sub-commands.
-# Complex chains should be broken into separate tool calls.
-# Set to 0 to disable (default).
+# Set to 0 to disable (default). Recommended: 5
 max_chain_length = 5
 
 # --- Reusable variables (referenced as ${VAR_NAME} in regex fields) ---
-# Standard env vars like $HOME expand automatically in values.
 
 [variables]
-# Safe command groups (merged via inter-variable expansion)
-# File and text processing
-FILE_CMDS = "awk|cat|comm|cut|diff|expand|file|fmt|fold|grep|head|nl|od|paste|rg|sed|seq|shuf|sort|tac|tail|tee|tr|unexpand|uniq|wc|xargs"
-# Filesystem navigation and management
-FS_CMDS = "basename|cd|chmod|cp|dirname|du|df|find|ls|lsof|mkdir|mktemp|readlink|realpath|stat|touch|tree"
-# Process and system info
-SYS_CMDS = "date|echo|env|export|expr|false|id|nproc|numfmt|printenv|printf|pwd|sleep|source|test|timeout|true|tty|uname|which|whoami"
-# Merged safe commands (variable references expand automatically)
-SAFE_CMDS = "${FILE_CMDS}|${FS_CMDS}|${SYS_CMDS}"
-# Block command substitution (backtick and $(...))
+# --- Safe command groups (harmless utilities only, NO runtimes) ---
+# Text processing (read/transform stdin or files, no side effects)
+TEXT_CMDS = "awk|cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs"
+# Search and query (find content within text or structured data)
+SEARCH_CMDS = "grep|jq|rg"
+# Formatting and layout (presentation of text)
+FORMAT_CMDS = "column|expand|fmt|fold|nl|paste|unexpand"
+# File-content inspection utilities (read-only)
+INSPECT_CMDS = "file|mediainfo|pdftotext"
+# Checksums and hashes (read-only)
+CHECKSUM_CMDS = "md5|md5sum|shasum|sha256sum"
+# Filesystem navigation and inspection
+FS_CMDS = "basename|cd|chmod|cp|dirname|du|df|ln|ls|lsof|mkdir|mktemp|open|readlink|realpath|stat|tar|touch|tree|type|unlink|unzip|which"
+# Process info and management
+PROC_CMDS = "pgrep|pkill|ps|sleep|timeout"
+# System info and shell builtins
+SYS_CMDS = "curl|date|echo|env|export|expr|false|id|nproc|numfmt|printenv|printf|pwd|screencapture|source|test|true|tty|uname|whoami|xcrun|xxd"
+# Build and lint tools (read-only or local-build only, no installs)
+DEV_CMDS = "bandit|make|pyflakes"
+# Merged safe commands -- harmless utilities only, NO runtimes
+SAFE_CMDS = "${TEXT_CMDS}|${SEARCH_CMDS}|${FORMAT_CMDS}|${INSPECT_CMDS}|${CHECKSUM_CMDS}|${FS_CMDS}|${PROC_CMDS}|${SYS_CMDS}|${DEV_CMDS}"
+
+# --- Local runtimes (can execute code, constrained allow patterns only) ---
+# npx: only whitelisted packages auto-allowed; unknown packages passthrough to user prompt.
+LOCAL_RUNTIMES = "node|deno"
+
+# --- Security patterns ---
+# Block command substitution (backtick and $(...)) to prevent injection
 NO_CMD_SUB = "`|\\$\\("
-# Allowed project path - customize to your workspace
-PROJECT_PATH = "^$HOME/projects/"
-# Path traversal exclusion
+# Path traversal exclusion (blocks .. in paths)
 NO_TRAVERSAL = "\\.\\."
 
-# --- DENY rules (checked first, take precedence over allow) ---
+# --- Approved filesystem zones ---
+# Read access: user LaunchAgents and Logs (debugging launchd jobs)
+LIBRARY_READ_PATH = "^$HOME/Library/(LaunchAgents|Logs)/"
+# Read access: project workspace and top-level dotdirs only (not all of $HOME).
+# Customize "projects" to match your workspace folder name.
+# Matches: ~/projects, ~/projects/..., ~/.config/..., ~/.claude/..., etc.
+HOME_PATH = "^$HOME/(projects(/|$)|\\.[^/]+(/|$))"
+# Write access: project workspace (matches ~/projects and ~/projects/...).
+# Customize "projects" to match your workspace folder name.
+PROJECT_PATH = "^$HOME/projects(/|$)"
+# Write access: Claude internal config
+CLAUDE_PATH = "^$HOME/\\.claude/"
 
-# Deny rm - uses \b word boundary to catch rm anywhere in a command,
-# including inside compound commands like "echo ok && rm file".
+# ===================================================================
+# DENY rules (checked first, before allow rules)
+# Every deny rule MUST have a reason field to steer Claude to a better path.
+# ===================================================================
+
+# --- Destructive file operations ---
+
+# Deny rm (with exceptions for safe patterns)
 [[deny]]
 tool = "Bash"
 command_regex = "\\brm\\b"
+command_exclude_regex = "\\bgit\\s+rm\\b|\\brm\\s+(-[a-zA-Z]+\\s+)*/tmp/|\\brm\\s+(-[a-zA-Z]+\\s+)*\\S*[Cc]ache|\\brm\\s+(-[a-zA-Z]+\\s+)*(\\S*/)?_\\S+"
+reason = "rm is restricted. Allowed: 'git rm' for tracked files, 'rm /tmp/...' for temp files, 'rm *Cache*' for caches, 'rm _prefix' for scratch files. For other deletions, ask the user."
 
-# Deny sensitive file reads
+# Deny sensitive file reads (.env, .secret contain credentials)
 [[deny]]
 tool = "Read"
 file_path_regex = "\\.(env|secret)$"
+reason = "Do not read .env or .secret files. These contain credentials. Ask the user to provide specific values you need."
 
-# Deny git commit - uses \b word boundaries to catch git with any
-# flags between git and commit (e.g. "git --no-pager commit",
-# "git -C /tmp commit").
+# Deny bare mv (use git mv for tracked files)
+[[deny]]
+tool = "Bash"
+command_regex = "^mv\\b"
+reason = "Use 'git mv' for tracked files. If the file is untracked, use cp + rm or ask the user."
+
+# Deny destructive podman operations (force removal, prune, kill, force stop)
+[[deny]]
+tool = "Bash"
+command_regex = "^podman\\s+(rm\\s+-f|rmi\\s+-f|kill|stop\\s+-t\\s*0|system\\s+prune|volume\\s+(rm|prune)|network\\s+(rm|prune)|image\\s+(rm|prune))\\b"
+reason = "Destructive podman operations (force removal, prune, kill, force stop) are restricted. Ask the user to run these manually if truly needed."
+
+# --- Destructive git operations ---
+
+# Deny git commit -- only humans commit
 [[deny]]
 tool = "Bash"
 command_regex = ".*\\bgit\\b.*\\bcommit\\b"
+reason = "Only humans run git commit. Update docs/CHANGELOG.md with your changes and let the user commit when ready."
 
 # Deny git stash
 [[deny]]
 tool = "Bash"
 command_regex = ".*\\bgit\\b.*\\bstash\\b"
+reason = "Do not use git stash. Work directly on the current branch. If you need to preserve changes, ask the user."
 
-# Deny git clean (destructive)
+# Deny git clean (destructive, removes untracked files)
 [[deny]]
 tool = "Bash"
 command_regex = ".*\\bgit\\b.*\\bclean\\b"
+reason = "git clean is destructive and removes untracked files. Use targeted rm or manual cleanup instead."
+
+# Deny git reset --hard -- destroys uncommitted work
+[[deny]]
+tool = "Bash"
+command_regex = "\\bgit\\b.*\\breset\\s+--hard\\b"
+reason = "git reset --hard destroys uncommitted work. Use 'git checkout -- <file>' to revert specific files, or 'git restore <file>' for targeted reverts. Ask the user for full resets."
+
+# Deny all force pushes (--force, -f, --force-with-lease) -- destroys remote history.
+# Any force push requires explicit user approval; ask the user to push manually.
+[[deny]]
+tool = "Bash"
+command_regex = "\\bgit\\b.*\\bpush\\b.*(-f\\b|--force\\b|--force-with-lease\\b)"
+reason = "Force pushing can destroy remote history. Ask the user to run the push command manually so they can verify the target branch."
+
+# --- Privilege escalation ---
+
+# Deny sudo -- no privilege escalation from Claude
+[[deny]]
+tool = "Bash"
+command_regex = "\\bsudo\\b"
+reason = "Do not use sudo. Ask the user to run privileged commands manually."
+
+# --- Remote code execution ---
+
+# Deny deno run with http/https URLs
+[[deny]]
+tool = "Bash"
+command_regex = "\\bdeno\\s+run\\s+.*https?://"
+reason = "Do not run remote Deno scripts. Download the file first, review it, then run the local copy with 'deno run local_file.ts'."
+
+# Deny piping remote content to a runtime -- classic RCE pattern
+[[deny]]
+tool = "Bash"
+command_regex = "\\bcurl\\b.*\\|.*\\b(bash|sh|python|node)\\b|\\bwget\\b.*\\|.*\\b(bash|sh|python|node)\\b"
+reason = "Do not pipe remote content to a runtime (curl | bash pattern). Download to a file first with curl -o, review it, then execute the local file."
+
+# --- Python environment steering ---
+
+# Deny PYTHONDONTWRITEBYTECODE / PYTHONUNBUFFERED env prefixes.
+# source_me.sh already exports these; Claude should use it.
+[[deny]]
+tool = "Bash"
+command_regex = "PYTHONDONTWRITEBYTECODE|PYTHONUNBUFFERED"
+reason = "Do not set PYTHONDONTWRITEBYTECODE or PYTHONUNBUFFERED manually. Use 'source source_me.sh && python3 ...' instead."
+
+# Deny VAR=$(...) assignments as standalone commands.
+[[deny]]
+tool = "Bash"
+command_regex = "^[A-Za-z_]+=\\$\\("
+reason = "Do not use VAR=$(...) assignments. Use 'source source_me.sh' for environment setup or inline the command directly."
+
+# Deny $PYTHON variable - use python3 directly
+[[deny]]
+tool = "Bash"
+command_regex = "\\$PYTHON\\b|\\$\\{PYTHON\\}"
+reason = "Use 'python3' directly instead of $PYTHON variable."
+
+# Deny bare env-var-only assignment (no command following).
+[[deny]]
+tool = "Bash"
+command_regex = "^[A-Za-z_]+=[^\\s]+$"
+reason = "Environment variable assignment with no command. Run a command after the assignment (e.g. FOO=x command ...) or set the variable inside your script."
+
+# Deny hardcoded homebrew python -c (inline code)
+[[deny]]
+tool = "Bash"
+command_regex = "/opt/homebrew/bin/python3[^\\s]*\\s+-c\\b"
+reason = "Do not use /opt/homebrew/bin/python3 -c with inline code. Write a _temp.py file and run it with 'source source_me.sh && python3 _temp.py' (underscore-prefixed files can be removed freely)."
+
+# --- Shell anti-patterns ---
+
+# Deny heredocs (<<EOF, <<'EOF', <<"EOF", <<-EOF, etc.)
+[[deny]]
+tool = "Bash"
+command_regex = "<<-?\\s*['\"]?\\w+"
+reason = "Do not use heredocs (<<EOF). Write code to a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
 
 # Deny for loops (force .py/.sh files for looping logic)
 [[deny]]
@@ -77,51 +196,152 @@ tool = "Bash"
 command_regex = "^while\\b"
 reason = "Do not use while loops in Bash tool. Write the logic in a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
 
-# Deny git rm
+# Deny redundant bash -c / bash -lc wrappers inside the Bash tool.
+# The Bash tool already runs bash, so bash -c "cmd" is bash-in-bash.
 [[deny]]
 tool = "Bash"
-command_regex = ".*\\bgit\\b.*\\brm\\b"
+command_regex = "^bash\\s+-[a-zA-Z]*c[a-zA-Z]*\\s+"
+reason = "bash -c / bash -lc is redundant inside the Bash tool. Run the command directly."
 
-# Deny bare mv (use git mv for tracked files)
+# --- Tool steering (use dedicated Claude tools instead) ---
+
+# Deny find - use the Glob tool instead
 [[deny]]
 tool = "Bash"
-command_regex = "^mv\\b"
-reason = "Use 'git mv' for tracked files. If the file is untracked, use cp + rm or ask the user."
+command_regex = "^find\\b"
+reason = "Use the Glob tool instead of find. Example: Glob(pattern='**/*.py', path='/search/dir'). Glob supports recursive glob patterns and is faster than find."
 
-# Example: deny with custom reason (shown to Claude when rule fires)
-# [[deny]]
-# tool = "Bash"
-# command_regex = "\\$PYTHON\\b"
-# reason = "Use 'python3' directly instead of $PYTHON variable"
+# Deny cat/head/tail when reading files (has an absolute path argument).
+# Pipeline leaves like 'head -5' (no file, consuming stdin) are not matched.
+[[deny]]
+tool = "Bash"
+command_regex = "^(cat|head|tail)\\b[^>|]*/"
+reason = "Use the Read tool instead of cat/head/tail. Read supports offset and limit parameters for reading specific line ranges."
 
-# --- ALLOW rules ---
+# Deny grep/rg when searching files (has an absolute path argument).
+# Pipeline leaves like 'grep pattern' (no file, filtering stdin) are not matched.
+[[deny]]
+tool = "Bash"
+command_regex = "^(grep|egrep|fgrep|rg)\\b.*\\s/\\S"
+reason = "Use the Grep tool instead of grep/egrep/fgrep/rg. Grep supports regex patterns, glob file filters, context lines (-A/-B/-C), head_limit, and output modes (content, files_with_matches, count)."
+
+# Deny absolute-path grep/rg (bypass attempt for the ^grep/^rg deny rule)
+[[deny]]
+tool = "Bash"
+command_regex = "^/\\S*(grep|egrep|fgrep|rg)\\b.*\\s/\\S"
+reason = "Use the Grep tool instead of grep/egrep/fgrep/rg. Do not invoke them via absolute path."
+
+# Deny sed -n for line extraction - use Read with offset and limit instead.
+[[deny]]
+tool = "Bash"
+command_regex = "^sed\\s+-n\\b"
+reason = "Use the Read tool with offset and limit parameters instead of sed -n for extracting line ranges."
+
+# --- WeBWorK steering ---
+
+# Deny perl on WeBWorK PG/PGML files -- PGML is not standard Perl
+[[deny]]
+tool = "Bash"
+command_regex = "^perl\\b.*\\.pg(ml)?\\b"
+reason = "Do not run perl on .pg or .pgml files. PGML is not standard Perl. Use the /webwork-writer skill lint guide to validate WeBWorK problems."
+
+# --- TypeScript steering ---
+
+# Deny direct tsc via node_modules paths -- steer to 'npx tsc'
+[[deny]]
+tool = "Bash"
+command_regex = "\\bnode_modules/(\\.bin|typescript/bin)/tsc\\b"
+reason = "Use 'npx tsc' instead of calling tsc via node_modules paths. If 'npx tsc' fails because TypeScript is not installed, stop and tell the user: 'Please run: npm install --save-dev typescript' (or, for a global install: 'npm install -g typescript'). Do not work around the failure with absolute paths, 'node node_modules/...', or source_me.sh chains."
+
+# --- Unavailable tools ---
+
+# Deny gh CLI (not installed)
+[[deny]]
+tool = "Bash"
+command_regex = "^gh\\b"
+reason = "gh CLI is not installed. Do not use GitHub CLI commands."
+
+# --- Path scoping (blast radius control) ---
+
+# Deny writes to system directories
+[[deny]]
+tool = "Write"
+file_path_regex = "^/(etc|usr|opt|System|Library)/"
+reason = "Cannot write to system directories. Use project paths under ~/projects/ or scratch files in /tmp/."
+
+[[deny]]
+tool = "Edit"
+file_path_regex = "^/(etc|usr|opt|System|Library)/"
+reason = "Cannot edit system files. Use project paths under ~/projects/ or scratch files in /tmp/."
+
+# ===================================================================
+# ALLOW rules
 # The shell command decomposer (brush-parser) splits compound commands
 # (&&, ||, ;, pipes, loops) and unwraps bash -c "..." patterns into
-# leaf sub-commands.  Each leaf is checked independently against these
-# rules, so simple per-command rules are sufficient.
+# leaf sub-commands. Env-var assignments (e.g. NODE_PATH=/foo) are
+# stripped from leaves so TOML rules match the normalized command only.
+# Each leaf is checked independently, so simple per-command rules suffice.
+# ===================================================================
+
+# --- rm exceptions ---
+# rm is denied by default. These exceptions cover safe, reversible deletions:
+# git rm (tracked, reversible via git), /tmp (scratch), cache dirs, _prefixed files.
+
+# Allow git rm with relative paths only (tracked, reversible)
+[[allow]]
+tool = "Bash"
+command_regex = "\\bgit\\s+rm\\s+(-[a-zA-Z]+\\s+)*[^/\\s-]"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow rm in /tmp
+[[allow]]
+tool = "Bash"
+command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*/tmp/\\S+"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow rm on cache directories
+[[allow]]
+tool = "Bash"
+command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*\\S*[Cc]ache"
+command_exclude_regex = "${NO_CMD_SUB}"
 
 # Allow rm on underscore-prefixed files (temporary/scratch files)
 [[allow]]
 tool = "Bash"
-command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*_\\S+"
+command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*(\\S*/)?_\\S+"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
-# Bash: python tooling
+# Bash: Python tooling
+# Python execution is core workflow. source_me.sh sets up the environment.
+# Allow python3, pytest, pyflakes directly. Block command substitution.
+# Env-var prefixes (PYTHONPATH=...) are stripped by the decomposer.
 # -------------------------------------------------------------------
 
 [[allow]]
 tool = "Bash"
-command_regex = "^(python3?|PYTHONPATH=)\\s?"
+command_regex = "^(python3?|/opt/homebrew/opt/python@3\\.12/bin/python3\\.12|PYTHONPATH=)\\s?"
 command_exclude_regex = "${NO_CMD_SUB}"
 
+# Allow homebrew python running .py files directly (but not -c)
+[[allow]]
+tool = "Bash"
+command_regex = "^/opt/homebrew/bin/python3[^\\s]*\\s+[^-]"
+command_exclude_regex = "\\s-c\\b|${NO_CMD_SUB}"
+
+# Allow: pytest and pyflakes invoked directly
 [[allow]]
 tool = "Bash"
 command_regex = "^(pytest|pyflakes)\\s"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
-# Bash: local runtimes (node, deno, npx whitelist)
+# Bash: local runtime execution (node, deno)
+# Runtimes can execute code, so they get constrained patterns instead
+# of blanket SAFE_CMDS membership. npx is excluded (passthroughs to
+# user prompt because it may fetch remote packages).
+# Env-var prefixes (NODE_PATH=...) are stripped by the decomposer,
+# so these rules match both prefixed and non-prefixed forms.
 # -------------------------------------------------------------------
 
 # node running local JS files (.js, .mjs, .cjs)
@@ -130,18 +350,18 @@ tool = "Bash"
 command_regex = "^node\\s+(-[a-zA-Z]+\\s+)*[A-Za-z0-9_./-]+\\.(js|mjs|cjs)\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
-# node -c / --check for syntax checking (read-only, no injection vector)
+# node -c / --check for syntax checking (read-only)
 [[allow]]
 tool = "Bash"
 command_regex = "^node\\s+(-c|--check)\\s"
 
-# node -e / --eval for quick inline evaluation
+# node -e / --eval for quick inline evaluation (JSON validation, etc.)
 [[allow]]
 tool = "Bash"
 command_regex = "^node\\s+(-e|--eval)\\s"
 command_exclude_regex = "${NO_CMD_SUB}"
 
-# node --version (info only, no arguments)
+# node --version (info only)
 [[allow]]
 tool = "Bash"
 command_regex = "^node\\s+--version"
@@ -150,7 +370,7 @@ command_regex = "^node\\s+--version"
 # Unknown packages still passthrough to user prompt.
 [[allow]]
 tool = "Bash"
-command_regex = "^npx\\s+(tsc|eslint|prettier)(\\s|$)"
+command_regex = "^npx\\s+(tsc|eslint|prettier|playwright|esbuild)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # eslint -- local code linter (read-only analysis)
@@ -165,19 +385,35 @@ tool = "Bash"
 command_regex = "^prettier\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
-# deno subcommands for local development (not remote URLs)
+# deno subcommands for local development (not remote URLs).
+# deno eval excluded -- arbitrary inline execution is too broad;
+# it falls through to passthrough (user prompted).
 [[allow]]
 tool = "Bash"
 command_regex = "^deno\\s+(run|check|fmt|lint|test)\\b"
 command_exclude_regex = "https?://|${NO_CMD_SUB}"
 
-# deno --version (info only, no arguments)
+# deno --version (info only)
 [[allow]]
 tool = "Bash"
 command_regex = "^deno\\s+--version"
 
 # -------------------------------------------------------------------
-# Bash: cargo commands (exclude destructive subcommands)
+# Bash: podman read-only inspection, build, compose, and exec probes.
+# Destructive operations (rm -f, prune, kill, force stop) are denied above.
+# Note: arguments to 'podman exec' are NOT re-decomposed by the hook, so
+# destructive shell inside a container is a container-level concern.
+# -------------------------------------------------------------------
+
+[[allow]]
+tool = "Bash"
+command_regex = "^podman\\s+(ps|pod|images|image\\s+ls|logs|inspect|info|version|port|top|stats|history|diff|build|compose|start|stop|restart|pull|tag|cp|exec)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: cargo
+# Rust build tool for this repo. Allow all subcommands except those
+# that publish to registries or install system-wide binaries.
 # -------------------------------------------------------------------
 
 [[allow]]
@@ -186,34 +422,83 @@ command_regex = "^cargo\\b"
 command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
-# Bash: git allowlist (read-only + staging)
+# Bash: git allowlist
+# Read-only and local-only git operations. Excludes: commit (human-only),
+# stash, clean, reset --hard, push --force, rebase (all denied or passthrough).
 # -------------------------------------------------------------------
 
 [[allow]]
 tool = "Bash"
-command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|checkout|diff|log|ls-files|ls-tree|mv|pull|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
+command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|check-ignore|checkout|diff|grep|ls-files|ls-tree|log|mv|pull|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
-# Bash: run a shell script directly (with optional -n syntax check)
+# Bash: launchctl read-only queries
 # -------------------------------------------------------------------
 
+# Allow launchctl read-only queries (list, print, blame, dumpstate)
+[[allow]]
+tool = "Bash"
+command_regex = "^launchctl\\s+(list|print|blame|dumpstate|dumpjpcategory)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: mkdocs local development
+# -------------------------------------------------------------------
+
+# Allow mkdocs read-only and local subcommands
+[[allow]]
+tool = "Bash"
+command_regex = "^mkdocs\\s+(--version|build|serve)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: shell and Python scripts
+# -------------------------------------------------------------------
+
+# Run a shell script directly (with optional -n syntax check)
 [[allow]]
 tool = "Bash"
 command_regex = "^bash\\s+(-n\\s+)?[A-Za-z0-9_./-]+\\.sh\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
-# -------------------------------------------------------------------
-# Bash: execute a shell script via relative path (./script.sh)
-# -------------------------------------------------------------------
-
+# Execute a shell script via relative path (./script.sh)
 [[allow]]
 tool = "Bash"
 command_regex = "^\\./[A-Za-z0-9_.-]+\\.sh\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
+# Execute a local binary under ./bin/ (e.g. ./bin/Volume.exe, ./bin/runner)
+# Project repos that ship compiled tools commonly place them in bin/.
+[[allow]]
+tool = "Bash"
+command_regex = "^\\./bin/[A-Za-z0-9_.-]+(\\.exe)?\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Execute a Python script via relative path (./script.py, ./dir/script.py)
+[[allow]]
+tool = "Bash"
+command_regex = "^\\./[A-Za-z0-9_/./-]+\\.py\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Relative-path .py scripts without ./ prefix (e.g. tools/runner.py -i ...)
+# The decomposer splits "source source_me.sh && tools/runner.py -i file"
+# into two leaves. The second leaf starts with a bare relative path.
+[[allow]]
+tool = "Bash"
+command_regex = "^[A-Za-z0-9_][A-Za-z0-9_./-]+\\.py\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Relative-path .sh scripts without ./ prefix (e.g. scripts/build.sh)
+[[allow]]
+tool = "Bash"
+command_regex = "^[A-Za-z0-9_][A-Za-z0-9_./-]+\\.sh\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
 # -------------------------------------------------------------------
-# Bash: common shell utilities
+# Bash: common shell utilities (harmless, no runtimes)
+# Env-var prefixes are stripped by the decomposer, so no separate
+# env-prefixed rule is needed.
 # -------------------------------------------------------------------
 
 [[allow]]
@@ -222,23 +507,14 @@ command_regex = "^(${SAFE_CMDS})\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
-# Bash: env-var-prefixed commands (e.g. LC_ALL=C grep ...,
-# REPO_ROOT=x PYTHONPATH=y python3 -m pytest ...)
-# Supports one or more VAR=value prefixes before the command.
+# Bash: package manager read-only queries
+# pip/brew/npm info queries are safe. Install subcommands stay as
+# passthrough so the user gets prompted before modifying the machine.
 # -------------------------------------------------------------------
 
 [[allow]]
 tool = "Bash"
-command_regex = "^([A-Z_]+=[^ ]+\\s+)+(${SAFE_CMDS}|python3?|pytest|pyflakes)\\b"
-command_exclude_regex = "${NO_CMD_SUB}"
-
-# -------------------------------------------------------------------
-# Bash: package managers (read-only queries)
-# -------------------------------------------------------------------
-
-[[allow]]
-tool = "Bash"
-command_regex = "^pip3?\\s+(show|list|freeze|check)\\b"
+command_regex = "^(python3?\\s+-m\\s+)?pip3?\\s+(show|list|freeze|check)\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 [[allow]]
@@ -257,6 +533,16 @@ tool = "Bash"
 command_regex = "^npm\\s+run\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
+# npm install typescript -- the exact commands the tsc steering deny recommends.
+# Matches only:
+#   npm install --save-dev typescript
+#   npm install -g typescript
+# Any extra flags, packages, or variations still passthrough for user approval.
+[[allow]]
+tool = "Bash"
+command_regex = "^npm\\s+install\\s+(--save-dev|-g)\\s+typescript\\s*$"
+command_exclude_regex = "${NO_CMD_SUB}"
+
 # -------------------------------------------------------------------
 # Glob/Grep: search tools
 # -------------------------------------------------------------------
@@ -267,19 +553,42 @@ file_path_regex = "${PROJECT_PATH}"
 file_path_exclude_regex = "${NO_TRAVERSAL}"
 
 [[allow]]
+tool = "Glob"
+file_path_regex = "${CLAUDE_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+[[allow]]
 tool = "Grep"
 file_path_regex = "${PROJECT_PATH}"
 file_path_exclude_regex = "${NO_TRAVERSAL}"
 
+[[allow]]
+tool = "Grep"
+file_path_regex = "${CLAUDE_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+# /tmp access for Glob/Grep (consistent with Read/Write/Edit /tmp rules)
+[[allow]]
+tool = "Glob"
+file_path_regex = "^(/private)?/tmp(/|$)"
+
+[[allow]]
+tool = "Grep"
+file_path_regex = "^(/private)?/tmp(/|$)"
+
 # -------------------------------------------------------------------
-# Read/Write/Edit: filesystem access
+# Read/Write/Edit: filesystem access zones
+# Read: ~/projects/, ~/., site-packages, /tmp, /var/folders/ (broad for inspection)
+# Write/Edit: ~/projects/, ~/.claude/, /tmp only (narrow for modification)
+# This asymmetry lets Claude read widely but write only in approved zones.
 # -------------------------------------------------------------------
 
 [[allow]]
 tool = "Read"
-file_path_regex = "${PROJECT_PATH}"
+file_path_regex = "${HOME_PATH}"
 file_path_exclude_regex = "${NO_TRAVERSAL}"
 
+# Write/Edit access to project files under $HOME/projects/
 [[allow]]
 tool = "Write"
 file_path_regex = "${PROJECT_PATH}"
@@ -289,6 +598,38 @@ file_path_exclude_regex = "${NO_TRAVERSAL}"
 tool = "Edit"
 file_path_regex = "${PROJECT_PATH}"
 file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+# Write/Edit access to Claude internal files (~/.claude/)
+[[allow]]
+tool = "Write"
+file_path_regex = "${CLAUDE_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+[[allow]]
+tool = "Edit"
+file_path_regex = "${CLAUDE_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+# Read/Glob/Grep access to user LaunchAgents and Logs (debugging launchd jobs)
+[[allow]]
+tool = "Read"
+file_path_regex = "${LIBRARY_READ_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+[[allow]]
+tool = "Glob"
+file_path_regex = "${LIBRARY_READ_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+[[allow]]
+tool = "Grep"
+file_path_regex = "${LIBRARY_READ_PATH}"
+file_path_exclude_regex = "${NO_TRAVERSAL}"
+
+# ARM Homebrew (/opt/homebrew) and Intel Homebrew (/usr/local) site-packages
+[[allow]]
+tool = "Read"
+file_path_regex = "^/(opt/homebrew|usr/local)/lib/python3\\.[0-9]+/site-packages/"
 
 # /tmp access for scratch files (macOS resolves /tmp to /private/tmp)
 [[allow]]
@@ -319,6 +660,7 @@ file_path_regex = "^/var/folders/[^/]+/[^/]+/T/"
 
 # -------------------------------------------------------------------
 # Web tools
+# WebFetch and WebSearch are read-only information gathering. No local state change.
 # -------------------------------------------------------------------
 
 [[allow]]
@@ -328,12 +670,20 @@ tool = "WebFetch"
 tool = "WebSearch"
 
 # -------------------------------------------------------------------
-# Task/subagent tools
+# Agent/Task orchestration
+# Two-layer permission model:
+#   Layer 1 (this hook): May Claude launch this agent type?
+#     subagent_type checked against allowlist regex pattern.
+#     Missing subagent_type passes through to user prompt (fail closed).
+#   Layer 2 (agent .md specs in ~/.claude/agents/): What tools does the agent have?
+#     Each agent's frontmatter lists its available tools.
+# Uses a broad pattern match instead of hardcoded names so new agents
+# in ~/.claude/agents/ are auto-allowed without TOML changes.
 # -------------------------------------------------------------------
 
 [[allow]]
 tool = "Agent"
-subagent_type_regex = "^(Explore|general-purpose|Plan|Bash|haiku|sonnet|opus|statusline-setup|claude-code-guide|superpowers:code-reviewer)$"
+subagent_type_regex = "^[a-zA-Z][a-zA-Z0-9_:-]*$"
 
 # -------------------------------------------------------------------
 # Claude internal tools (orchestration/UI, no side effects)

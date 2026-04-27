@@ -24,8 +24,13 @@
 
 ### Fixes and Maintenance
 
-- `config_test.sh`: 23 tests pass, config validates with 90 rules
-  (31 deny, 59 allow).
+- Synced `example.toml` to be a full mirror of the production config
+  (90 rules, 31 deny, 59 allow), with personal paths genericized:
+  `~/nsh/` -> `~/projects/`, `NSH_PATH` -> `PROJECT_PATH`,
+  `audit_level = "all"` -> `"matched"`. Previously the example was a
+  trimmed-down 365-line subset that drifted out of sync with reality.
+- `config_test.sh`: 23 tests pass, both production and example configs
+  validate.
 
 ## 2026-04-22
 
