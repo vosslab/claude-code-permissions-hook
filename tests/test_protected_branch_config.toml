@@ -1,0 +1,34 @@
+[audit]
+audit_file = "/tmp/test-audit.json"
+
+[git_protection]
+protected_branches = ["main", "master"]
+
+# Deny commits on protected branches (git commit as a verb, not --no-commit)
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b(?:\\s+(?:-C\\s+\\S+|-c\\s+\\S+|--git-dir=\\S+|--work-tree=\\S+|-[a-zA-Z]+))*\\s+commit\\b"
+reason = "Commits denied on protected branches"
+protected_branch_check = true
+
+# Deny reset --hard on protected branches
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\breset\\s+--hard\\b"
+reason = "Reset --hard denied on protected branches"
+protected_branch_check = true
+
+# Allow commits on non-protected branches
+[[allow]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\bcommit\\b"
+
+# Allow reset --hard on non-protected branches
+[[allow]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\breset\\s+--hard\\b"
+
+# Allow any merge command
+[[allow]]
+tool = "Bash"
+command_regex = ".*\\bmerge\\b"

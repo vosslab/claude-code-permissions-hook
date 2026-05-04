@@ -233,8 +233,8 @@ deny	git stash pop
 deny	git clean -fdx
 deny	git reset --hard HEAD~1
 deny	git push --force-with-lease origin main
-passthrough	git rebase -i HEAD~3
-passthrough	git rebase main
+deny	git rebase -i HEAD~3
+deny	git rebase main
 
 # --- Cargo: more allowed and passthrough cases ---
 allow	cargo clippy
@@ -345,3 +345,40 @@ deny	ffprobe -version
 deny	perl -c problem.pgml
 deny	perl problem.pg
 passthrough	perl plain.pl
+
+# --- Protected branch: push-to-protected denies ---
+deny	git push origin main
+deny	git push origin master
+deny	git push origin main:main
+deny	git push origin HEAD:main
+deny	git push origin feature:main
+deny	git push origin refs/heads/main
+deny	git push origin HEAD:refs/heads/main
+deny	git push origin +HEAD:main
+deny	git push origin :main
+deny	git push --force-with-lease origin HEAD:main
+deny	git push origin --delete main
+deny	git push origin +feature:refs/heads/main
+deny	git push origin refs/heads/feature:refs/heads/main
+deny	git push origin HEAD:refs/heads/master
+deny	git push origin :refs/heads/main
+passthrough	git push origin agent/foo
+passthrough	git push -u origin agent/foo
+
+# --- Protected branch: invocation shapes ---
+deny	/usr/bin/git push origin main
+deny	command git push origin main
+deny	GIT_DIR=.git GIT_WORK_TREE=. git push origin main
+deny	git -C /tmp/r push origin main
+
+# --- Protected branch: local-mutation regex-only denies ---
+deny	git update-ref refs/heads/main HEAD
+deny	git symbolic-ref HEAD refs/heads/main
+deny	git branch -f main HEAD~1
+deny	git branch -D main
+
+# --- Protected branch: shape-only merge denies ---
+deny	git merge --continue
+deny	git cherry-pick --continue
+deny	git revert --continue
+allow	git merge --abort

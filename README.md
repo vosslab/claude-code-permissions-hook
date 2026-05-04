@@ -21,6 +21,15 @@ Register the hook by pointing a `PreToolUse` entry in `.claude/settings.json` at
 the binary with `--config /path/to/config.toml`. See [docs/INSTALL.md](docs/INSTALL.md)
 for the full settings block.
 
+## Protected-branch workflow: agents prepare, humans commit
+
+The hook enforces a split-responsibility model: agents work on feature branches
+and prepare merges with `git merge --no-commit --no-ff`, while humans review the
+staged result and run the final commit. Protected branches (default `main`, `master`)
+block agents from committing directly; agents commit freely on their own branches.
+See [docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md) for the full workflow,
+allowed/denied table, configuration, and security model.
+
 ## Documentation
 
 - [docs/INSTALL.md](docs/INSTALL.md): requirements, build steps, hook registration

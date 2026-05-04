@@ -8,6 +8,12 @@ passthrough_log_file = "/tmp/claude-passthrough.json"
 # Set to 0 to disable (default). Recommended: 5
 max_chain_length = 5
 
+[git_protection]
+# Branches that are considered "protected". Agents are restricted from directly
+# committing/pushing to these; they prepare changes for human approval instead.
+protected_branches = ["main", "master"]
+protected_refs = ["refs/heads/main", "refs/heads/master"]
+
 # --- Reusable variables (referenced as ${VAR_NAME} in regex fields) ---
 
 [variables]
@@ -42,6 +48,10 @@ NON_TMP_ROOTS = "Users|home|usr|etc|opt|var|bin|sbin|root|sys|proc|dev|Library|S
 # --- Local runtimes (can execute code, constrained allow patterns only) ---
 # npx: only whitelisted packages auto-allowed; unknown packages passthrough to user prompt.
 LOCAL_RUNTIMES = "node|deno"
+
+# --- Git invocation patterns ---
+# Match various forms of git invocation (direct, with flags, env vars, absolute paths)
+GIT_INVOCATION = "(?:^|\\s)(?:command\\s+)?(?:[A-Za-z0-9_]+=\\S+\\s+)*(?:/[^\\s]+/)?git(?:\\s+|$)(?:-(?:C|c)\\s+\\S+\\s+|--git-dir(?:=|\\s+)\\S+\\s+|--work-tree(?:=|\\s+)\\S+\\s+)*"
 
 # --- Security patterns ---
 # Block command substitution (backtick and $(...)) to prevent injection
@@ -96,36 +106,136 @@ reason = "Destructive podman operations (force removal, prune, kill, force stop)
 
 # --- Destructive git operations ---
 
-# Deny git commit -- only humans commit
-[[deny]]
-tool = "Bash"
-command_regex = ".*\\bgit\\b.*\\bcommit\\b"
-reason = "Only humans run git commit. Update docs/CHANGELOG.md with your changes and let the user commit when ready."
+# git commit is now branch-aware: see "Deny local mutations on protected branches" below.
 
 # Deny git stash
 [[deny]]
 tool = "Bash"
-command_regex = ".*\\bgit\\b.*\\bstash\\b"
+command_regex = ".*${GIT_INVOCATION}stash\\b"
 reason = "Do not use git stash. Work directly on the current branch. If you need to preserve changes, ask the user."
 
 # Deny git clean (destructive, removes untracked files)
 [[deny]]
 tool = "Bash"
-command_regex = ".*\\bgit\\b.*\\bclean\\b"
+command_regex = ".*${GIT_INVOCATION}clean\\b"
 reason = "git clean is destructive and removes untracked files. Use targeted rm or manual cleanup instead."
 
-# Deny git reset --hard -- destroys uncommitted work
-[[deny]]
-tool = "Bash"
-command_regex = "\\bgit\\b.*\\breset\\s+--hard\\b"
-reason = "git reset --hard destroys uncommitted work. Use 'git checkout -- <file>' to revert specific files, or 'git restore <file>' for targeted reverts. Ask the user for full resets."
+# git reset --hard is now branch-aware: see "Deny reset --hard on protected branches" below.
 
 # Deny all force pushes (--force, -f, --force-with-lease) -- destroys remote history.
 # Any force push requires explicit user approval; ask the user to push manually.
 [[deny]]
 tool = "Bash"
-command_regex = "\\bgit\\b.*\\bpush\\b.*(-f\\b|--force\\b|--force-with-lease\\b)"
+command_regex = ".*${GIT_INVOCATION}push\\b.*(-f\\b|--force\\b|--force-with-lease\\b)"
 reason = "Force pushing can destroy remote history. Ask the user to run the push command manually so they can verify the target branch."
+
+# --- Protected branch enforcement ---
+# These rules deny operations that would advance protected branch tips.
+# The workflow: agents prepare merges with `git merge --no-commit --no-ff` on protected branches,
+# leaving the working tree and index ready for human review and final `git commit` and `git push`.
+
+# Deny push to protected branches (any form: direct, colon notation, +force, deletion, etc.)
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}push\\b.*\\b${PROTECTED_REFS}\\b"
+reason = "Push to protected branches blocked. The human pushes after merging and committing. Prepare a merge with: git merge --no-commit --no-ff agent/<task>"
+
+# Deny local mutations on protected branches: commit
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}commit\\b"
+protected_branch_check = true
+reason = "Protected branch command blocked. You are on a protected branch.\n\nWorkflow: agents prepare the merge, the human commits and pushes.\n\n  git merge --no-commit --no-ff agent/<task>\n  # resolve conflicts, run tests, leave staged\n\nThe user will review with `git diff HEAD` and run the final `git commit` and `git push` themselves."
+
+# Deny reset --hard on protected branches
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}reset\\s+--hard\\b"
+protected_branch_check = true
+reason = "Protected branch command blocked. You are on a protected branch.\n\nWorkflow: agents prepare the merge, the human commits and pushes.\n\n  git merge --no-commit --no-ff agent/<task>\n  # resolve conflicts, run tests, leave staged\n\nThe user will review with `git diff HEAD` and run the final `git commit` and `git push` themselves."
+
+# Deny ref-plumbing against protected refs
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}(?:update-ref|symbolic-ref)\\b.*\\b${PROTECTED_REFS}\\b"
+reason = "Protected branch command blocked. Ref-plumbing against protected branches is not allowed."
+
+# Deny dangerous branch operations on protected names
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}branch\\s+(?:-f|--force|-D)\\b.*\\b${PROTECTED_BRANCHES}\\b"
+reason = "Protected branch command blocked. Cannot force-delete or force-overwrite protected branches."
+
+# Deny any merge on protected branches except the sanctioned prepare-shape
+# and --abort. The exclude carves out the legitimate forms; specific denies
+# below (-m, protected source, --continue, --ff-only, --squash) still fire
+# on their respective shapes via separate rules.
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}merge\\b"
+command_exclude_regex = "\\bmerge\\s+--abort\\b|\\bmerge\\s+(?:--no-commit\\s+--no-ff|--no-ff\\s+--no-commit)\\s+[A-Za-z0-9._/][A-Za-z0-9._/-]*\\s*$"
+protected_branch_check = true
+reason = "Protected branch command blocked. Use `git merge --no-commit --no-ff agent/<task>` on protected branches to prepare a merge for human review and final commit."
+
+# Unconditional deny: --continue forms finalize commits after conflict resolution
+# and violate the "human makes the commit" rule on every branch.
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}(?:merge|cherry-pick|revert|rebase)\\s+--continue\\b"
+reason = "git <verb> --continue creates a commit after conflict resolution. The human runs the final commit. Use `git <verb> --abort` if the operation went wrong, then resolve and re-prepare on a feature branch."
+
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}merge\\s+(?:--ff-only|--squash)"
+protected_branch_check = true
+reason = "Protected branch command blocked. Non-standard merge forms on protected branches. Use `git merge --no-commit --no-ff`."
+
+# Allow the safe merge form on protected branches
+# Deny merge-prepare with -m / --message: the human writes the merge message.
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}merge\\s+(?:--no-commit\\s+--no-ff|--no-ff\\s+--no-commit)\\b.*\\s(?:-m|--message)\\b"
+protected_branch_check = true
+reason = "Protected branch command blocked. Do not use -m/--message on the merge-prepare command. Stage the merge with `git merge --no-commit --no-ff agent/<task>` and let the human write the commit message."
+
+# Deny merge-prepare with a protected source branch (would merge protected into protected).
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}merge\\s+(?:--no-commit\\s+--no-ff|--no-ff\\s+--no-commit)\\s+${PROTECTED_BRANCHES}\\s*$"
+protected_branch_check = true
+reason = "Protected branch command blocked. The merge-prepare source must be a non-protected branch (e.g. agent/<task>)."
+
+# Allow only the narrow merge-prepare form on protected branches:
+#   git merge --no-commit --no-ff <non-protected-branch>
+# Both flags required (any order). Exactly one branch-like trailing arg.
+# No -m / --message. No protected source branch. The human writes the message.
+# Allow on any branch. On protected branches the specific denies above (-m,
+# protected source) catch misuse. On feature branches there's no restriction
+# to begin with.
+[[allow]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}merge\\s+(?:--no-commit\\s+--no-ff|--no-ff\\s+--no-commit)\\s+[A-Za-z0-9._/][A-Za-z0-9._/-]*\\s*$"
+reason = "Allowed: merge preparation with --no-commit --no-ff. On protected branches the human reviews and commits."
+
+# Allow merge abort unconditionally
+[[allow]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}merge\\s+--abort"
+reason = "Allowed: merge abort (escape hatch for conflict resolution failures)."
+
+# Deny cherry-pick and revert on protected branches
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}(?:cherry-pick|revert)\\b"
+protected_branch_check = true
+reason = "Protected branch command blocked. Cherry-pick and revert create commits on protected branches. Not allowed."
+
+# Deny rebase on protected branches
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}rebase\\b"
+protected_branch_check = true
+reason = "Protected branch command blocked. Rebase on protected branches. Not allowed."
 
 # --- Privilege escalation ---
 

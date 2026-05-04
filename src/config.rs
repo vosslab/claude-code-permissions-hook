@@ -15,6 +15,9 @@ pub struct Config {
     /// Optional limits for command complexity.
     #[serde(default)]
     pub limits: LimitsConfig,
+    /// Optional git protection settings for protected branches.
+    #[serde(default)]
+    pub git_protection: GitProtectionConfig,
     /// Reusable string fragments for regex patterns.
     /// Reference in regex fields as `${VAR_NAME}`.
     #[serde(default)]
@@ -33,6 +36,27 @@ pub struct LimitsConfig {
     /// Set to 0 to disable the limit (default).
     #[serde(default)]
     pub max_chain_length: usize,
+}
+
+/// Git protection settings for protected branches.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct GitProtectionConfig {
+    /// Names of git branches that are protected (e.g., ["main", "master"]).
+    /// Defaults to ["main", "master"].
+    #[serde(default = "default_protected_branches")]
+    pub protected_branches: Vec<String>,
+    /// Full ref names that are protected (e.g., ["refs/heads/main", "refs/heads/master"]).
+    /// Defaults to ["refs/heads/main", "refs/heads/master"].
+    #[serde(default = "default_protected_refs")]
+    pub protected_refs: Vec<String>,
+}
+
+fn default_protected_branches() -> Vec<String> {
+    vec!["main".to_string(), "master".to_string()]
+}
+
+fn default_protected_refs() -> Vec<String> {
+    vec!["refs/heads/main".to_string(), "refs/heads/master".to_string()]
 }
 
 impl Default for LimitsConfig {
@@ -84,6 +108,9 @@ pub struct RuleConfig {
     /// Optional human-readable reason shown when this rule matches.
     /// Overrides the auto-generated match description.
     pub reason: Option<String>,
+    /// When true, rule only fires if the current branch is in protected_branches.
+    /// Used for branch-aware git rules. Defaults to None (no branch check).
+    pub protected_branch_check: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +128,8 @@ pub struct Rule {
     pub prompt_exclude_regex: Option<Regex>,
     /// Optional human-readable reason shown when this rule matches.
     pub reason: Option<String>,
+    /// When true, rule only fires if the current branch is in protected_branches.
+    pub protected_branch_check: Option<bool>,
 }
 
 impl Config {
@@ -110,6 +139,42 @@ impl Config {
 
         let mut config: Config = toml::from_str(&contents)
             .with_context(|| format!("Failed to parse TOML config: {}", path.display()))?;
+
+        // Auto-inject PROTECTED_BRANCHES variable from git_protection config
+        let protected_branches_regex = config.git_protection.protected_branches.iter()
+            .map(|b| regex::escape(b))
+            .collect::<Vec<_>>()
+            .join("|");
+        if !protected_branches_regex.is_empty() {
+            config.variables.insert(
+                "PROTECTED_BRANCHES".to_string(),
+                format!("(?:{})", protected_branches_regex),
+            );
+            debug!("Auto-injected PROTECTED_BRANCHES variable");
+        }
+
+        // Auto-inject PROTECTED_REFS variable: union of protected_refs and
+        // refs/heads/<protected_branches>. This lets push/refspec rules match
+        // both bare names ("main") and full ref paths ("refs/heads/main") with
+        // a single variable.
+        let mut protected_refs_alts: Vec<String> = config
+            .git_protection
+            .protected_refs
+            .iter()
+            .map(|r| regex::escape(r))
+            .collect();
+        for b in &config.git_protection.protected_branches {
+            protected_refs_alts.push(regex::escape(b));
+        }
+        protected_refs_alts.sort();
+        protected_refs_alts.dedup();
+        if !protected_refs_alts.is_empty() {
+            config.variables.insert(
+                "PROTECTED_REFS".to_string(),
+                format!("(?:{})", protected_refs_alts.join("|")),
+            );
+            debug!("Auto-injected PROTECTED_REFS variable");
+        }
 
         // Expand environment variables ($HOME, $USER, etc.) in variable values
         config.variables = config
@@ -339,6 +404,7 @@ fn compile_rule_with_vars(
         prompt_regex,
         prompt_exclude_regex,
         reason: rule_config.reason.clone(),
+        protected_branch_check: rule_config.protected_branch_check,
     })
 }
 
@@ -362,6 +428,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
 
         let vars = HashMap::new();
@@ -421,6 +488,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
 
         let rule = compile_rule_with_vars(&rule_config, &vars)?;

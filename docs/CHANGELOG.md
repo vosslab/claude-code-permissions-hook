@@ -1,5 +1,76 @@
 # Changelog
 
+## 2026-05-04
+
+### Additions and New Features
+
+- Added `[git_protection]` config section with `protected_branches` (list of
+  branch names; default `["main", "master"]`) and `protected_refs` (list of full
+  ref paths; default `["refs/heads/main", "refs/heads/master"]`). Allows
+  customization of which branches are protected from agent mutation.
+- Added `protected_branch_check` rule field that gates a rule on live git state
+  via `git rev-parse --abbrev-ref HEAD`. When `true`, the rule fires only if the
+  current branch is in `protected_branches`.
+- Added one allowed merge form on protected branches:
+  `git merge --no-commit --no-ff <non-protected-source>`. The allow rule is
+  narrow: rejects missing source, protected source branches, and `-m` /
+  `--message`. The human writes the commit message at finalization.
+- Added two paired denies that catch the disallowed merge-prepare variants:
+  `-m`/`--message` on the merge-prepare line, and a protected source branch.
+  These produce specific steering messages instead of falling through to
+  passthrough.
+- Added [docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md) as the canonical
+  maintainer-facing reference for the protected-branch workflow,
+  configuration, allowed/denied table, and security model.
+- Trimmed the protected-branch section in `docs/CLAUDE_HOOK_USAGE_GUIDE.md` to
+  a short summary and pointer to `docs/WORKTREE_POLICY.md`.
+
+### Behavior or Interface Changes
+
+- Switched `git commit` from blanket deny to branch-aware deny: denied only on
+  protected branches; allowed on agent/feature branches.
+- Switched `git reset --hard` from blanket deny to branch-aware deny: denied on
+  protected branches; allowed on agent/feature branches.
+- Switched `git rebase`, `git cherry-pick`, `git revert` from blanket denies to
+  branch-aware denies (same pattern).
+- Added blanket deny for all push forms targeting protected refs, covering:
+  `git push <remote> <protected>`, `git push <remote> <any>:<protected>`,
+  `git push <remote> refs/heads/<protected>`, `git push <remote> :<protected>`,
+  `git push --delete origin <protected>`. All forms are denied; agents do not
+  push protected refs (humans push after final commit).
+- Updated `docs/CLAUDE_HOOK_USAGE_GUIDE.md` section "git commit, git stash,
+  git clean" to explain branch awareness and link to the new workflow section.
+- Updated `docs/CLAUDE_HOOK_USAGE_GUIDE.md` section "git reset --hard" to note
+  it is now branch-aware.
+- Updated `docs/configuration-guide.md` with `[git_protection]` schema entry,
+  documenting `protected_branches`, `protected_refs`, and `protected_branch_check`.
+- Updated `README.md` with a new subsection "Protected-branch workflow: agents
+  prepare, humans commit" linking to `docs/WORKTREE_POLICY.md`.
+- Made `--continue` denies unconditional (every branch) for `git merge`,
+  `git cherry-pick`, `git revert`, and `git rebase`. These finalize commits
+  after conflict resolution and violate the "human makes the commit" rule.
+- Wired auto-injected `${PROTECTED_REFS}` (full ref paths plus bare branch
+  names) and `${PROTECTED_BRANCHES}` into the push, ref-plumbing, and
+  branch -f rules so `protected_branches = ["trunk"]` actually protects
+  `trunk`, `refs/heads/trunk`, and refspec targets ending in either form.
+- Wired the shared `${GIT_INVOCATION}` regex variable into every git rule.
+  Centralizes recognition of `git`, `command git`, `/usr/bin/git`,
+  `/opt/homebrew/bin/git`, `GIT_DIR=... git`, and `git -C <path>` in one
+  place.
+- Added 11 integration tests in `tests/test_protected_branch.rs` covering
+  config override (`trunk` instead of `main`), fail-closed on non-repo cwd,
+  `git -C <other-repo>` branch resolution, raw `git merge` deny on protected,
+  `--no-commit --no-ff` with protected source, `-m` flag rejection, missing
+  `--no-commit` or `--no-ff` boundary cases, prepare-merge allow on feature
+  branches, `merge --continue` deny, and `merge --abort` allow.
+
+### Scope
+
+This change is a guardrail for normal Git workflows, not a security boundary.
+Real enforcement belongs on the forge (branch protection, required PRs, no
+force push) and at the OS layer. Maintainer-facing detail in
+[docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md).
+
 ## 2026-04-27
 
 ### Additions and New Features

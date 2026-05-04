@@ -302,14 +302,22 @@ are also allowed.
 **Instead:** Use underscore-prefixed filenames for scratch files (`_temp.py`),
 write to `/tmp/`, or use `git rm` for tracked files.
 
-### `git commit`, `git stash`, `git clean`
+### `git commit`, `git stash`, `git clean` (branch-aware)
 
-**Blocked:** All variations including flag insertion (`git -C /tmp commit`).
+**Blocked on protected branches:** `git commit`, `git commit --amend` (all variations
+including flag insertion like `git -C /tmp commit`). `git stash` and `git clean` are
+denied everywhere.
 
-**Why:** Humans make commits. `git clean` is destructive and removes untracked files.
+**Why:** On protected branches (typically `main`, `master`), commits are made by the
+human after reviewing the staged merge via `git diff`. On agent branches, you have
+full commit access. `git stash` and `git clean` are destructive and remove tracked
+or untracked work.
 
-**Instead:** Stage changes with `git add` and update `docs/CHANGELOG.md`. The user
-commits manually.
+**Instead:** Work on an `agent/<task>` branch where commits are allowed. To prepare
+a merge into a protected branch, use `git merge --no-commit --no-ff agent/<task>`
+and let the human review and commit. See
+[Worktrees and protected branches](#worktrees-and-protected-branches) for the full
+workflow.
 
 ### `cat`/`head`/`tail` with file paths
 
@@ -434,11 +442,14 @@ Running script files (`bash script.sh`, `bash -n script.sh`) is still allowed.
 
 ### `git reset --hard`
 
-**Blocked:** `git reset --hard`, `git reset -hard HEAD~1`
+**Blocked on protected branches:** Destructive history rewrite. Denied on protected
+branches (`main`, `master`); allowed on agent/feature branches for local work.
 
-**Why:** Destructive history rewrite. Use safer alternatives.
+**Instead on protected:** Use safer alternatives like `git checkout -- file` or
+`git restore file` to discard working changes.
 
-**Instead:** `git checkout -- file` or `git restore file` to discard working changes.
+**On agent branches:** `git reset --hard` is allowed for local cleanup and rebasing
+your own work.
 
 ### `git push --force` (including --force-with-lease)
 
@@ -532,6 +543,24 @@ useless.
 
 **Instead:** Write a `_temp.py` file and run it with
 `source source_me.sh && python3 _temp.py`.
+
+## Worktrees and protected branches
+
+Agents work on `agent/<task>` branches (often inside a worktree) and prepare
+merges into protected branches (`main`, `master` by default) using:
+
+```bash
+git merge --no-commit --no-ff agent/<task>
+```
+
+This stages the merge result without creating the commit. The human reviews
+with `git diff HEAD` and runs the final `git commit` and `git push` themselves.
+Direct `git commit`, `git rebase`, `git reset --hard`, `git cherry-pick`,
+`git revert`, and pushes targeting protected refs are denied while on a
+protected branch; the same commands are allowed on a feature/agent branch.
+
+See [docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md) for the full policy,
+allowed/denied table, configuration, and the security model.
 
 ## Passthrough (requires user approval)
 

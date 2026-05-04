@@ -4,9 +4,144 @@
 use crate::config::Rule;
 use crate::hook_io::HookInput;
 use log::{debug, trace};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-/// Checks rules against input, returning the reason if a rule matches.
-pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<String> {
+/// Helper: parse git invocation to extract effective cwd and verb.
+/// Given a leaf command string, identifies:
+/// - (a) the "verb" after git/git -c/-C/--git-dir/--work-tree
+/// - (b) the effective cwd (the -C path resolved against hook_cwd, or hook_cwd if absent)
+/// Returns (verb, effective_cwd) on success, or None on parse error.
+fn parse_git_invocation(leaf: &str, hook_cwd: &Path) -> Option<(String, PathBuf)> {
+    let parts: Vec<&str> = leaf.split_whitespace().collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut idx = 0;
+
+    // Check for "command git" form
+    if parts[idx] == "command" && idx + 1 < parts.len() && parts[idx + 1] == "git" {
+        idx = 2;
+    } else if parts[idx] == "git" {
+        idx = 1;
+    } else if parts[idx].ends_with("/git") {
+        idx = 1;
+    } else {
+        // Check for environment variable prefix (GIT_VAR=val git ...)
+        if parts[idx].contains('=') && parts[idx].chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+            idx += 1;
+            // Skip multiple env vars
+            while idx < parts.len() && parts[idx].contains('=') {
+                idx += 1;
+            }
+            if idx < parts.len() && (parts[idx] == "git" || parts[idx].ends_with("/git")) {
+                idx += 1;
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    }
+
+    let mut effective_cwd = hook_cwd.to_path_buf();
+
+    // Parse git options: -c key=val, -C path, --git-dir, --work-tree
+    while idx < parts.len() && parts[idx].starts_with('-') {
+        if parts[idx] == "-c" && idx + 1 < parts.len() {
+            idx += 2; // Skip -c and value
+        } else if parts[idx] == "-C" && idx + 1 < parts.len() {
+            // Resolve -C path against hook_cwd
+            let path_str = parts[idx + 1];
+            effective_cwd = if path_str.starts_with('/') {
+                PathBuf::from(path_str)
+            } else {
+                hook_cwd.join(path_str)
+            };
+            idx += 2;
+        } else if parts[idx].starts_with("--git-dir=") || parts[idx].starts_with("--work-tree=") {
+            idx += 1;
+        } else if parts[idx] == "--git-dir" || parts[idx] == "--work-tree" {
+            idx += 2; // Skip option and value
+        } else {
+            break;
+        }
+    }
+
+    // The first non-option token is the verb
+    if idx < parts.len() {
+        let verb = parts[idx].to_string();
+        Some((verb, effective_cwd))
+    } else {
+        None
+    }
+}
+
+/// Get the current branch name for a given cwd.
+/// Returns Some(branch_name) on success, None if:
+/// - git command fails
+/// - detached HEAD (returned as "HEAD")
+/// - cwd is not a git repo
+/// Fails closed: if branch lookup fails, return None.
+fn get_current_branch(cwd: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(&["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let branch = String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .to_string();
+
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch)
+    }
+}
+
+/// Check if a git command would run on a protected branch.
+/// For commands with -C option, resolve the effective cwd and check that branch.
+/// If branch lookup fails or cwd is unresolvable, return true (fail-closed).
+fn is_on_protected_branch(
+    command: &str,
+    hook_cwd: &str,
+    protected_branches: &[String],
+) -> bool {
+    let hook_cwd_path = Path::new(hook_cwd);
+
+    // Try to parse git invocation to get verb and effective cwd
+    if let Some((_, effective_cwd)) = parse_git_invocation(command, hook_cwd_path) {
+        // Check if effective_cwd is a git repo and on a protected branch
+        if let Some(current_branch) = get_current_branch(&effective_cwd) {
+            // Detached HEAD ("HEAD") is not protected
+            if current_branch == "HEAD" {
+                return false;
+            }
+            // Check if current branch is in protected list
+            return protected_branches.iter().any(|pb| pb == &current_branch);
+        }
+    }
+
+    // Fail-closed: if we can't determine the branch, return true
+    true
+}
+
+/// Checks rules against input with optional protected branches support.
+/// Internal function that accepts protected_branches list.
+fn check_rules_internal(
+    rules: &[Rule],
+    input: &HookInput,
+    protected_branches: &[String],
+) -> Option<String> {
     trace!(
         "Checking {} rules for tool: {}",
         rules.len(),
@@ -26,7 +161,7 @@ pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<String> {
         }
 
         trace!("Evaluating rule {} for tool: {}", idx, input.tool_name);
-        if let Some(auto_reason) = check_rule(rule, input) {
+        if let Some(auto_reason) = check_rule_with_context(rule, input, protected_branches) {
             // Custom reason is prepended; auto-generated reason with the
             // actual command/path is always appended for specificity.
             let reason = match &rule.reason {
@@ -40,6 +175,22 @@ pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<String> {
     trace!("No rules matched for tool: {}", input.tool_name);
     None
 }
+
+/// Public API: Checks rules against input, returning the reason if a rule matches.
+/// Uses default empty protected_branches list for backward compatibility.
+pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<String> {
+    check_rules_internal(rules, input, &[])
+}
+
+/// Public API: Checks rules with protected branches list.
+pub fn check_rules_with_protected_branches(
+    rules: &[Rule],
+    input: &HookInput,
+    protected_branches: &[String],
+) -> Option<String> {
+    check_rules_internal(rules, input, protected_branches)
+}
+
 
 /// Check if a rule is tool-only (no regex or subagent fields set).
 /// Such rules match any input for the given tool name.
@@ -55,7 +206,11 @@ fn is_tool_only_rule(rule: &Rule) -> bool {
         && rule.prompt_exclude_regex.is_none()
 }
 
-fn check_rule(rule: &Rule, input: &HookInput) -> Option<String> {
+fn check_rule_with_context(
+    rule: &Rule,
+    input: &HookInput,
+    protected_branches: &[String],
+) -> Option<String> {
     // Tool-only rules (e.g. [[allow]] tool = "WebFetch") match any input for that tool
     if is_tool_only_rule(rule) {
         return Some(format!("Matched tool-only rule for {}", input.tool_name));
@@ -108,6 +263,13 @@ fn check_rule(rule: &Rule, input: &HookInput) -> Option<String> {
                     &rule.command_exclude_regex,
                 )
             {
+                // If protected_branch_check is set, verify we're on a protected branch
+                if let Some(true) = rule.protected_branch_check {
+                    if !is_on_protected_branch(&command, &input.cwd, protected_branches) {
+                        trace!("Rule matched but not on protected branch");
+                        return None;
+                    }
+                }
                 return Some(format!("Matched rule for Bash with command: {}", command));
             }
         }
@@ -244,6 +406,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         assert!(is_tool_only_rule(&tool_only));
     }
@@ -263,6 +426,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         assert!(!is_tool_only_rule(&with_regex));
     }
@@ -282,6 +446,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         let input = HookInput {
             session_id: "test".to_string(),
@@ -291,7 +456,7 @@ mod tests {
             tool_name: "WebFetch".to_string(),
             tool_input: serde_json::json!({"url": "https://example.com"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         assert!(result.is_some());
         assert!(result.unwrap().contains("tool-only"));
     }
@@ -311,6 +476,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         let input = HookInput {
             session_id: "test".to_string(),
@@ -320,7 +486,7 @@ mod tests {
             tool_name: "Glob".to_string(),
             tool_input: serde_json::json!({"path": "/home/user/project", "pattern": "*.rs"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         assert!(result.is_some());
         assert!(result.unwrap().contains("path:"));
     }
@@ -340,6 +506,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         let input = HookInput {
             session_id: "test".to_string(),
@@ -349,7 +516,7 @@ mod tests {
             tool_name: "Grep".to_string(),
             tool_input: serde_json::json!({"path": "/home/user/project", "pattern": "fn main"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         assert!(result.is_some());
         assert!(result.unwrap().contains("path:"));
     }
@@ -369,6 +536,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         // No "path" field in tool_input -- should fall back to cwd
         let input = HookInput {
@@ -379,7 +547,7 @@ mod tests {
             tool_name: "Glob".to_string(),
             tool_input: serde_json::json!({"pattern": "**/*.rs"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         assert!(result.is_some());
         assert!(result.unwrap().contains("/home/user/project"));
     }
@@ -399,6 +567,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         // No "path" field -- falls back to cwd
         let input = HookInput {
@@ -409,7 +578,7 @@ mod tests {
             tool_name: "Grep".to_string(),
             tool_input: serde_json::json!({"pattern": "fn main"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         assert!(result.is_some());
         assert!(result.unwrap().contains("/home/user/project"));
     }
@@ -429,6 +598,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         // Relative path "src/lib.rs" should be prepended with cwd
         let input = HookInput {
@@ -439,7 +609,7 @@ mod tests {
             tool_name: "Grep".to_string(),
             tool_input: serde_json::json!({"path": "src/lib.rs", "pattern": "fn main"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         assert!(result.is_some());
         assert!(result.unwrap().contains("/home/user/project/src/lib.rs"));
     }
@@ -459,6 +629,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         // Relative path "subdir" should be prepended with cwd
         let input = HookInput {
@@ -469,7 +640,7 @@ mod tests {
             tool_name: "Glob".to_string(),
             tool_input: serde_json::json!({"path": "subdir", "pattern": "*.rs"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         assert!(result.is_some());
         assert!(result.unwrap().contains("/home/user/project/subdir"));
     }
@@ -489,6 +660,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         // cwd is outside the allowed path -- should NOT match
         let input = HookInput {
@@ -499,7 +671,7 @@ mod tests {
             tool_name: "Glob".to_string(),
             tool_input: serde_json::json!({"pattern": "*.conf"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         assert!(result.is_none());
     }
 
@@ -518,6 +690,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         // Explicit path provided -- should use it, not cwd
         let input = HookInput {
@@ -528,7 +701,7 @@ mod tests {
             tool_name: "Glob".to_string(),
             tool_input: serde_json::json!({"path": "/home/user/project", "pattern": "*.rs"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         assert!(result.is_some());
     }
 
@@ -547,6 +720,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
 
         assert!(check_subagent_type(&rule, "codebase-analyzer"));
@@ -568,6 +742,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         // Agent input with NO subagent_type field -- should NOT match (fail closed)
         let input = HookInput {
@@ -578,7 +753,7 @@ mod tests {
             tool_name: "Agent".to_string(),
             tool_input: serde_json::json!({"prompt": "do something", "description": "test"}),
         };
-        let result = check_rule(&rule, &input);
+        let result = check_rule_with_context(&rule, &input, &[]);
         // Missing subagent_type should not match any rule -- falls to passthrough
         assert!(result.is_none());
     }
@@ -598,6 +773,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: Some("Use python3 directly instead of $PYTHON".to_string()),
+            protected_branch_check: None,
         };
         let input = HookInput {
             session_id: "test".to_string(),
@@ -630,6 +806,7 @@ mod tests {
             prompt_regex: None,
             prompt_exclude_regex: None,
             reason: None,
+            protected_branch_check: None,
         };
         let input = HookInput {
             session_id: "test".to_string(),

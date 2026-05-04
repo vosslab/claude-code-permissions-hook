@@ -21,7 +21,7 @@ use std::path::Path;
 pub use auditing::Decision;
 pub use config::{Config, Rule};
 pub use hook_io::{HookInput, HookOutput};
-pub use matcher::check_rules;
+pub use matcher::{check_rules, check_rules_with_protected_branches};
 
 /// Result of processing a hook input against the configured rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,12 +71,82 @@ pub fn process_hook_input(config_path: &Path, input: &HookInput) -> Result<HookR
 /// or for testing with custom configs.
 pub fn process_hook_input_with_config(config: &Config, input: &HookInput) -> Result<HookResult> {
     let (deny_rules, allow_rules) = config.compile_rules().context("Failed to compile rules")?;
-    Ok(process_hook_input_with_rules(
+    Ok(process_hook_input_with_rules_and_context(
         &deny_rules,
         &allow_rules,
         config.limits.max_chain_length,
         input,
+        &config.git_protection.protected_branches,
     ))
+}
+
+/// Internal version with protected branches context.
+fn process_hook_input_with_rules_and_context(
+    deny_rules: &[Rule],
+    allow_rules: &[Rule],
+    max_chain_length: usize,
+    input: &HookInput,
+    protected_branches: &[String],
+) -> HookResult {
+    // Decompose Bash commands and check each sub-command
+    if input.tool_name == "Bash" {
+        if let Some(command) = input.extract_field("command") {
+            // Check the original full command against deny rules first.
+            // This catches patterns (like heredocs) that the decomposer
+            // strips when extracting leaf commands.
+            if let Some(reason) = check_rules_with_protected_branches(deny_rules, input, protected_branches) {
+                return HookResult::deny(reason);
+            }
+
+            let sub_commands = decomposer::decompose_command(&command);
+
+            // Chain length limit: deny overly complex compound commands
+            if max_chain_length > 0 && sub_commands.len() > max_chain_length {
+                return HookResult::deny(format!(
+                    "Command has {} chained sub-commands (limit: {}). Break into smaller commands.",
+                    sub_commands.len(),
+                    max_chain_length,
+                ));
+            }
+
+            // Deny check: if ANY sub-command matches ANY deny rule, deny everything
+            for sub_cmd in &sub_commands {
+                let synthetic = input.with_command(sub_cmd);
+                if let Some(reason) = check_rules_with_protected_branches(deny_rules, &synthetic, protected_branches) {
+                    return HookResult::deny(reason);
+                }
+            }
+
+            // Allow check: ALL sub-commands must match some allow rule
+            let mut all_reasons = Vec::new();
+            let mut all_allowed = true;
+            for sub_cmd in &sub_commands {
+                let synthetic = input.with_command(sub_cmd);
+                if let Some(reason) = check_rules_with_protected_branches(allow_rules, &synthetic, protected_branches) {
+                    all_reasons.push(reason);
+                } else {
+                    all_allowed = false;
+                    break;
+                }
+            }
+
+            if all_allowed && !sub_commands.is_empty() {
+                let combined = all_reasons.join("; ");
+                return HookResult::allow(combined);
+            }
+
+            return HookResult::passthrough();
+        }
+    }
+
+    // Non-Bash tools: original logic
+    if let Some(reason) = check_rules_with_protected_branches(deny_rules, input, protected_branches) {
+        return HookResult::deny(reason);
+    }
+    if let Some(reason) = check_rules_with_protected_branches(allow_rules, input, protected_branches) {
+        return HookResult::allow(reason);
+    }
+    HookResult::passthrough()
 }
 
 /// Process a hook input against pre-compiled deny and allow rules.
@@ -97,65 +167,7 @@ pub fn process_hook_input_with_rules(
     max_chain_length: usize,
     input: &HookInput,
 ) -> HookResult {
-    // Decompose Bash commands and check each sub-command
-    if input.tool_name == "Bash" {
-        if let Some(command) = input.extract_field("command") {
-            // Check the original full command against deny rules first.
-            // This catches patterns (like heredocs) that the decomposer
-            // strips when extracting leaf commands.
-            if let Some(reason) = check_rules(deny_rules, input) {
-                return HookResult::deny(reason);
-            }
-
-            let sub_commands = decomposer::decompose_command(&command);
-
-            // Chain length limit: deny overly complex compound commands
-            if max_chain_length > 0 && sub_commands.len() > max_chain_length {
-                return HookResult::deny(format!(
-                    "Command has {} chained sub-commands (limit: {}). Break into smaller commands.",
-                    sub_commands.len(),
-                    max_chain_length,
-                ));
-            }
-
-            // Deny check: if ANY sub-command matches ANY deny rule, deny everything
-            for sub_cmd in &sub_commands {
-                let synthetic = input.with_command(sub_cmd);
-                if let Some(reason) = check_rules(deny_rules, &synthetic) {
-                    return HookResult::deny(reason);
-                }
-            }
-
-            // Allow check: ALL sub-commands must match some allow rule
-            let mut all_reasons = Vec::new();
-            let mut all_allowed = true;
-            for sub_cmd in &sub_commands {
-                let synthetic = input.with_command(sub_cmd);
-                if let Some(reason) = check_rules(allow_rules, &synthetic) {
-                    all_reasons.push(reason);
-                } else {
-                    all_allowed = false;
-                    break;
-                }
-            }
-
-            if all_allowed && !sub_commands.is_empty() {
-                let combined = all_reasons.join("; ");
-                return HookResult::allow(combined);
-            }
-
-            return HookResult::passthrough();
-        }
-    }
-
-    // Non-Bash tools: original logic
-    if let Some(reason) = check_rules(deny_rules, input) {
-        return HookResult::deny(reason);
-    }
-    if let Some(reason) = check_rules(allow_rules, input) {
-        return HookResult::allow(reason);
-    }
-    HookResult::passthrough()
+    process_hook_input_with_rules_and_context(deny_rules, allow_rules, max_chain_length, input, &[])
 }
 
 /// Validate a configuration file.

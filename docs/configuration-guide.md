@@ -218,6 +218,35 @@ audit_level = "matched"  # off | matched | all
 | `matched` | Record only allow/deny decisions (default) |
 | `all` | Record everything including passthrough |
 
+## Git Protection Configuration
+
+Configure which git branches are protected via the `[git_protection]` section:
+
+```toml
+[git_protection]
+protected_branches = ["main", "master"]
+protected_refs = ["refs/heads/main", "refs/heads/master"]
+```
+
+**Fields:**
+- `protected_branches` - List of branch names that are protected (checked against
+  the current branch name). Default: `["main", "master"]`.
+- `protected_refs` - List of full ref paths that are protected (checked against
+  refspec targets in push and update-ref commands). Default: `["refs/heads/main", "refs/heads/master"]`.
+
+**Rule field:** A rule can gate on live git state using the `protected_branch_check`
+field. When `protected_branch_check = true`, the rule fires only if the current
+branch (via `git rev-parse --abbrev-ref HEAD`) is in the `protected_branches` list.
+
+Example: a deny rule that blocks `git commit` only on protected branches:
+
+```toml
+[[deny]]
+tool = "Bash"
+command_regex = "^${GIT_INVOCATION}\\s+commit\\b"
+protected_branch_check = true
+```
+
 ## Complete Example
 
 ```toml
