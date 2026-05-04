@@ -19,6 +19,19 @@ EXAMPLE_CFG="$REPO_ROOT/example.toml"
 TSV="$REPO_ROOT/tests/command_decisions.tsv"
 FILTER="${1:-}"
 
+# ANSI color codes -- only used when stdout is a terminal.
+if [ -t 1 ]; then
+	RED=$'\033[1;31m'
+	GREEN=$'\033[1;32m'
+	BG_RED=$'\033[1;37;41m'
+	RESET=$'\033[0m'
+else
+	RED=""
+	GREEN=""
+	BG_RED=""
+	RESET=""
+fi
+
 if [ ! -x "$HOOK" ]; then
 	echo "FAIL: hook binary missing; run 'cargo build --release' first: $HOOK" >&2
 	exit 2
@@ -73,11 +86,15 @@ run_against_config() {
 			printf 'OK   [%s] expect=%-11s got=%-11s :: %s\n' "$label" "$expected" "$got" "$cmd"
 			pass=$((pass + 1))
 		else
-			printf 'FAIL [%s] expect=%-11s got=%-11s :: %s\n' "$label" "$expected" "$got" "$cmd"
+			printf '%sFAIL [%s] expect=%-11s got=%-11s :: %s%s\n' "$RED" "$label" "$expected" "$got" "$cmd" "$RESET"
 			fail=$((fail + 1))
 		fi
 	done < "$TSV"
-	printf '%s: %d passed, %d failed, %d total\n\n' "$label" "$pass" "$fail" "$total"
+	if [ "$fail" -eq 0 ]; then
+		printf '%s%s: %d passed, %d failed, %d total%s\n\n' "$GREEN" "$label" "$pass" "$fail" "$total" "$RESET"
+	else
+		printf '%s%s: %d passed, %d failed, %d total%s\n\n' "$RED" "$label" "$pass" "$fail" "$total" "$RESET"
+	fi
 	return "$fail"
 }
 
@@ -87,5 +104,14 @@ run_against_config "$EXAMPLE_CFG"  "example"
 example_fail=$?
 
 total_fail=$((live_fail + example_fail))
-printf 'OVERALL: %d failures (live=%d, example=%d)\n' "$total_fail" "$live_fail" "$example_fail"
-[ "$total_fail" -eq 0 ]
+if [ "$total_fail" -eq 0 ]; then
+	printf '%sOVERALL: ALL TESTS PASSED (live=0, example=0)%s\n' "$GREEN" "$RESET"
+	exit 0
+else
+	printf '%s ============================================================ %s\n' "$BG_RED" "$RESET"
+	printf '%s   FAILURE: %d MISMATCHES (live=%d, example=%d)%s\n' "$BG_RED" "$total_fail" "$live_fail" "$example_fail" "$RESET"
+	printf '%s   Live and example configs must produce identical decisions  %s\n' "$BG_RED" "$RESET"
+	printf '%s   for every TSV row. Drift between them is a hard failure.   %s\n' "$BG_RED" "$RESET"
+	printf '%s ============================================================ %s\n' "$BG_RED" "$RESET"
+	exit 1
+fi

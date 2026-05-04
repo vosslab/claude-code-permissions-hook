@@ -4,6 +4,14 @@
 
 ### Additions and New Features
 
+- Ported the full protected-branch rule set into the live user config at
+  `~/nsh/junk-drawer/CODEX/claude/claude-code-permissions-hook.toml` so the
+  new behavior is active in real Claude sessions. Live and example configs
+  now have parity on every TSV case (297/297 pass on each).
+- Updated `tests/run_command_decisions.sh` with ANSI-colored output: green
+  pass message on full success, loud red FAIL lines and a banner-style
+  failure block when live and example diverge. The script still exits
+  non-zero on any mismatch -- drift between configs is a hard failure.
 - Added `[git_protection]` config section with `protected_branches` (list of
   branch names; default `["main", "master"]`) and `protected_refs` (list of full
   ref paths; default `["refs/heads/main", "refs/heads/master"]`). Allows
