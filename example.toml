@@ -53,6 +53,17 @@ LOCAL_RUNTIMES = "node|deno"
 # Match various forms of git invocation (direct, with flags, env vars, absolute paths)
 GIT_INVOCATION = "(?:^|\\s)(?:command\\s+)?(?:[A-Za-z0-9_]+=\\S+\\s+)*(?:/[^\\s]+/)?git(?:\\s+|$)(?:-(?:C|c)\\s+\\S+\\s+|--git-dir(?:=|\\s+)\\S+\\s+|--work-tree(?:=|\\s+)\\S+\\s+)*"
 
+# --- Generic tool-prefix patterns (apply to non-git tool steers) ---
+# Optional prefix: bare command, "command <cmd>", or "env <cmd>".
+# PATH=/x and FOO=bar assignments are stripped structurally by the decomposer.
+# Caveat: "env FOO=bar <cmd>" is NOT covered (the assignment falls between
+# 'env' and the tool name); see docs/CHANGELOG.md.
+TOOL_PREFIX = "(?:command\\s+|env\\s+)?"
+# Optional absolute-path prefix for the tool name itself.
+# Matches /usr/bin/, /opt/homebrew/bin/, /bin/, etc. Tightly bounded
+# to avoid matching whitespace-adjacent junk or odd shapes.
+TOOL_PATH = "(?:/(?:[^/\\s]+/)*)?"
+
 # --- Security patterns ---
 # Block command substitution (backtick and $(...)) to prevent injection
 NO_CMD_SUB = "`|\\$\\("
@@ -253,10 +264,11 @@ tool = "Bash"
 command_regex = "\\bdeno\\s+run\\s+.*https?://"
 reason = "Do not run remote Deno scripts. Download the file first, review it, then run the local copy with 'deno run local_file.ts'."
 
-# Deny piping remote content to a runtime -- classic RCE pattern
+# Deny piping remote content to a runtime -- classic RCE pattern.
+# Covers curl/wget/fetch piped into any common interpreter or shell.
 [[deny]]
 tool = "Bash"
-command_regex = "\\bcurl\\b.*\\|.*\\b(bash|sh|python|node)\\b|\\bwget\\b.*\\|.*\\b(bash|sh|python|node)\\b"
+command_regex = "\\b(curl|wget|fetch)\\b[^|]*\\|\\s*${TOOL_PATH}(python3?|bash|sh|zsh|node|ruby|perl)\\b"
 reason = "Do not pipe remote content to a runtime (curl | bash pattern). Download to a file first with curl -o, review it, then execute the local file."
 
 # --- Python environment steering ---
@@ -327,31 +339,42 @@ tool = "Bash"
 command_regex = "^find\\b"
 reason = "Use the Glob tool instead of find. Example: Glob(pattern='**/*.py', path='/search/dir'). Glob supports recursive glob patterns and is faster than find."
 
-# Deny cat/head/tail when reading files (has an absolute path argument).
+# Deny cat/head/tail when reading files (any path-shaped argument).
 # Pipeline leaves like 'head -5' (no file, consuming stdin) are not matched.
+# Covers absolute-path invocations (/bin/cat) and command/env prefixes.
 [[deny]]
 tool = "Bash"
-command_regex = "^(cat|head|tail)\\b[^>|]*/"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>|]*/"
 reason = "Use the Read tool instead of cat/head/tail. Read supports offset and limit parameters for reading specific line ranges."
 
-# Deny grep/rg when searching files (has an absolute path argument).
+# Deny grep/rg when searching files (any path-shaped argument, relative or absolute).
 # Pipeline leaves like 'grep pattern' (no file, filtering stdin) are not matched.
+# Covers command/env prefixes.
 [[deny]]
 tool = "Bash"
-command_regex = "^(grep|egrep|fgrep|rg)\\b.*\\s/\\S"
+command_regex = "^${TOOL_PREFIX}(grep|egrep|fgrep|rg)\\b[^|]*/"
 reason = "Use the Grep tool instead of grep/egrep/fgrep/rg. Grep supports regex patterns, glob file filters, context lines (-A/-B/-C), head_limit, and output modes (content, files_with_matches, count)."
 
-# Deny absolute-path grep/rg (bypass attempt for the ^grep/^rg deny rule)
+# Deny absolute-path grep/rg unconditionally. Calling via absolute path
+# (/usr/bin/grep, /opt/homebrew/bin/rg) is a deliberate bypass attempt.
 [[deny]]
 tool = "Bash"
-command_regex = "^/\\S*(grep|egrep|fgrep|rg)\\b.*\\s/\\S"
+command_regex = "^${TOOL_PREFIX}/(?:[^/\\s]+/)+(grep|egrep|fgrep|rg)\\b"
 reason = "Use the Grep tool instead of grep/egrep/fgrep/rg. Do not invoke them via absolute path."
 
 # Deny sed -n for line extraction - use Read with offset and limit instead.
+# Covers absolute-path invocations and command/env prefixes.
 [[deny]]
 tool = "Bash"
-command_regex = "^sed\\s+-n\\b"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b"
 reason = "Use the Read tool with offset and limit parameters instead of sed -n for extracting line ranges."
+
+# Deny bash/sh/zsh -n shell-script syntax checks. Steers agents away from using
+# shell as a script-analysis tool. Inspect with the Read tool instead.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(bash|sh|zsh)\\s+-n\\b"
+reason = "Do not use bash/sh/zsh -n to syntax-check shell scripts. Inspect the script with the Read tool. If execution is needed, ask for explicit user approval or run the script through an allowed project command."
 
 # --- WeBWorK steering ---
 
@@ -387,6 +410,39 @@ tool = "Bash"
 command_regex = "^ffprobe(\\s|$)"
 command_exclude_regex = "(\\s|^)-show_(chapters|packets|frames)\\b|(\\s|^)-f\\s+lavfi\\b"
 reason = "Prefer 'mediainfo --Output=JSON <file>' for container, codec, and track metadata. ffprobe is allowed only with -show_chapters, -show_packets, -show_frames, or -f lavfi -- the cases mediainfo cannot handle."
+
+# --- Sensitive-path reads ---
+# Block any command that references credential or auth files. Match is
+# literal-path; ordinary docs that mention "ssh_config" or similar do
+# not contain "/etc/passwd" or "~/.ssh/" tokens. Placed before the
+# broad allow blocks so the deny fires first.
+[[deny]]
+tool = "Bash"
+command_regex = "(/etc/(passwd|shadow|sudoers|hosts)\\b|~/\\.ssh/|~/\\.aws/credentials\\b|/Users/[^/]+/\\.ssh/|/Users/[^/]+/\\.aws/credentials\\b)"
+reason = "Do not read system credential or auth files. If you need user or host info, ask the user."
+
+# --- Registry-mutating package commands ---
+# These change global state on package registries (or local credential
+# state). Always require explicit human authorization. The cargo allow
+# rule below already excludes these subcommands, but a deny here makes
+# the steer message explicit instead of silent passthrough.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}cargo\\s+(publish|yank|login|logout|owner)\\b"
+reason = "Registry-mutating cargo commands (publish/yank/login/logout/owner) require human authorization. Ask the user to run them manually."
+
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}npm\\s+(publish|unpublish|deprecate|owner|adduser|login|logout|token)\\b"
+reason = "Registry-mutating npm commands (publish/unpublish/deprecate/owner/adduser/login/logout/token) require human authorization. Ask the user to run them manually."
+
+# --- System package install ---
+# brew install/uninstall/upgrade modifies system-wide packages. Deny
+# unconditionally; the user runs these themselves.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}brew\\s+(install|uninstall|reinstall|upgrade|tap|untap|cask)\\b"
+reason = "Do not install or modify system packages with brew. Ask the user to run brew commands manually."
 
 # --- Path scoping (blast radius control) ---
 
@@ -602,10 +658,11 @@ command_exclude_regex = "${NO_CMD_SUB}"
 # Bash: shell and Python scripts
 # -------------------------------------------------------------------
 
-# Run a shell script directly (with optional -n syntax check)
+# Run a shell script directly. The -n syntax-check form is denied above
+# (steered to the Read tool) so this allow only covers actual execution.
 [[allow]]
 tool = "Bash"
-command_regex = "^bash\\s+(-n\\s+)?[A-Za-z0-9_./-]+\\.sh\\b"
+command_regex = "^bash\\s+[A-Za-z0-9_./-]+\\.sh\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # Execute a shell script via relative path (./script.sh)

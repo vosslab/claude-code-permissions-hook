@@ -1,5 +1,107 @@
 # Changelog
 
+## 2026-05-05
+
+### Additions and New Features
+
+- Added `[variables] TOOL_PREFIX` and `TOOL_PATH` regex helpers in
+  `example.toml` and the live config. `TOOL_PREFIX` matches optional
+  `command ` or `env ` invocation prefixes; `TOOL_PATH` matches an
+  optional absolute-path prefix on the tool name (e.g. `/usr/bin/`,
+  `/opt/homebrew/bin/`). `PATH=...` and other env-var assignments are
+  already stripped structurally by the decomposer, so they do not need
+  separate regex variants. Caveat: `env FOO=bar <cmd>` (env tool
+  followed by an inline assignment) is NOT covered by `TOOL_PREFIX`
+  alone; this residual gap is documented and left for follow-up if it
+  appears in real traffic.
+
+### Tier A: confirmed real-traffic bypass fixes
+
+A 2026-05-05 audit of `/tmp/claude-passthrough.json` (516 entries, 19
+sessions) revealed two real evasion patterns reaching passthrough:
+
+- `/usr/bin/grep -n "ui\." src/...` -- absolute-path grep with a
+  relative path argument. The previous absolute-path grep deny
+  (`example.toml:347` before this commit) only matched when the
+  argument started with `/`. The bypass used `src/...` (no leading
+  slash) and slipped through.
+- `bash -n ~/.claude/skills/.../check_codebase.sh` -- shell-as-analysis
+  via `bash -n`. The previous rule (`example.toml:608` before this
+  commit) explicitly ALLOWED this form, which is the wrong default.
+
+Fixes:
+
+- Rewrote the cat/head/tail, grep/rg, and sed -n denies to use
+  `${TOOL_PREFIX}` (catches `command grep`, `env grep`).
+- Replaced the two pre-existing grep denies with one path-shaped-arg
+  deny plus an unconditional absolute-path-grep deny (any
+  `/usr/bin/grep`, `/opt/homebrew/bin/rg`, etc. is steered regardless
+  of arguments).
+- Replaced the `[[allow]]` for `bash -n script.sh` with a `[[deny]]`
+  covering `bash`/`sh`/`zsh -n` on any script. Steer message points
+  agents to the Read tool for inspection.
+- Added 13 TSV fixtures in `tests/command_decisions.tsv` covering the
+  two confirmed bypasses, the `command`/`env` prefix variants, and the
+  absolute-path no-path-arg case.
+
+### Tier B: preventive hardening
+
+These rules close known evasion shapes that did not appear in the
+real-traffic sample but did appear in synthetic torture-fixture
+sessions:
+
+- Pipe-to-interpreter deny extended from `(curl|wget) | (bash|sh|python|node)`
+  to `(curl|wget|fetch) | (python3?|bash|sh|zsh|node|ruby|perl)`.
+- Sensitive-path read deny added: matches `/etc/passwd`, `/etc/shadow`,
+  `/etc/sudoers`, `/etc/hosts`, `~/.ssh/`, `~/.aws/credentials`, and
+  the macOS-resolved equivalents under `/Users/<u>/`. Placed before the
+  broad allow blocks so it fires first regardless of the underlying
+  tool (cat, sox, grep, etc.).
+- Registry-mutating package commands explicitly denied:
+  `cargo (publish|yank|login|logout|owner)` and
+  `npm (publish|unpublish|deprecate|owner|adduser|login|logout|token)`.
+  Previously these fell through to silent passthrough; now they
+  produce an explicit steer message.
+- System package install denied: `brew (install|uninstall|reinstall|upgrade|tap|untap|cask)`.
+- Added 23 TSV fixtures covering the pipe-to-interpreter expansions,
+  sensitive-path reads, registry-mutating cargo/npm, and brew system
+  installs.
+
+### Behavior or Interface Changes
+
+- `bash -n script.sh` is no longer allowed. Steered to the Read tool.
+  Existing `bash script.sh` (execution, no `-n`) remains allowed.
+- The two pre-existing grep denies (one for bare grep with absolute-path
+  arg, one for absolute-path grep with absolute-path arg) collapsed into
+  two new denies (path-shaped-arg + absolute-path-unconditional).
+- `cargo publish/yank/login/logout/owner` and the equivalent npm
+  registry commands are now denied with a steer message instead of
+  passthrough. The cargo allow rule already excluded these subcommands;
+  the new deny replaces the silent passthrough.
+- `brew install foo` is now denied (was passthrough). The pre-existing
+  TSV row was updated from `passthrough` to `deny`.
+- `wget https://x | python3` is now denied (was passthrough; the
+  pre-existing curl|interpreter rule covered fewer interpreters).
+
+### Verification
+
+- `cargo build --release` clean.
+- `bash tests/run_command_decisions.sh` -- 330/330 pass on both example
+  and live configs (was 297/297 before this change).
+- `cargo test --release` -- 103 tests pass, 0 failures.
+- Spot-check by hand on the two original bypasses confirms each
+  receives `permissionDecision":"deny"` with the new steer message.
+
+### Known limitations
+
+- `env FOO=bar grep ...` (env tool followed by an inline assignment) is
+  not covered by `TOOL_PREFIX`. Document-only; not observed in real
+  traffic. If it appears, add a dedicated pattern.
+- `npx` auto-install allowlist (B4 in the audit plan) was deliberately
+  deferred. The audit showed `npx tsx` and `npx tsc` as the most common
+  legitimate commands (107 invocations); a heuristic deny would have
+  high false-positive risk against real workflow traffic.
+
 ## 2026-05-04
 
 ### Additions and New Features
