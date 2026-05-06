@@ -6,7 +6,7 @@
 # Format: <expected>\t<command>
 # expected = allow | deny | passthrough
 # Lines starting with # and blank lines are skipped.
-# Add new cases anywhere; runner is tests/run_command_decisions.sh.
+# Add new cases anywhere; runner is tools/run_command_decisions.py.
 
 # --- ffprobe steering (deny by default, allow only mediainfo-cannot-do flags) ---
 allow	ffprobe -show_chapters /tmp/x.m4b
@@ -219,7 +219,68 @@ deny	egrep foo /tmp/x.log
 deny	fgrep foo /tmp/x.log
 deny	egrep -n pat /Users/vosslab/x.py
 deny	find /tmp -name *.py
+deny	/usr/bin/find . -name *.py
 deny	sed -n 1,5p /tmp/x.txt
+
+# --- Bash-side escape hatches named in the redirect-style deny reasons ---
+# `ls <dir>` and `git ls-files <pathspec>` are the allowed Bash forms when a
+# tool call is not viable (e.g. needing a shell-pipeline file list).
+allow	ls /tmp
+allow	ls docs/
+allow	git ls-files
+allow	git ls-files '*.py'
+allow	git ls-files docs/
+# `git grep` has its own deny rule using ${GIT_INVOCATION} so it catches
+# every git invocation form (bare, command/env prefixed, absolute path,
+# -C/-c/--git-dir/--work-tree flags). The Grep tool is the canonical
+# search path; `git grep` is denied, not allowed.
+deny	git grep -n pattern
+deny	git grep -n pattern -- '*.py'
+deny	git -C /tmp/repo grep -n pattern
+deny	command git grep -n pattern
+deny	env LANG=C git grep -n pattern
+deny	/usr/bin/git grep -n pattern
+deny	git -c core.pager=cat grep -n pattern
+deny	git --git-dir=.git grep -n pattern
+deny	git --work-tree=. grep -n pattern
+
+# --- rm relaxation: allow under ~/nsh/ (Write/Edit zone) and bare relative
+# paths. Hard-deny rules still block system paths, .. traversal, and bare
+# wildcards. Relaxes the "ask the user" stall for autonomous overnight runs.
+allow	rm /Users/vosslab/nsh/repo/Final_Exam/combined.yaml
+allow	rm /Users/vosslab/nsh/repo/Final_Exam/combined.docx
+allow	rm -f /Users/vosslab/nsh/repo/Final_Exam/foo.yaml
+allow	rm Final_Exam/foo.yaml
+allow	rm -rf build_output
+allow	rm docs/old_file.md
+allow	rm subdir/nested/file.txt
+# Existing safe patterns continue to work
+allow	rm /tmp/scratch.txt
+allow	rm _scratch.py
+allow	rm path/to/_scratch.py
+allow	rm -rf __pycache__
+allow	git rm tracked_file.py
+# Hard-deny: system paths (always blocked)
+deny	rm /etc/passwd
+deny	rm -rf /etc/
+deny	rm /usr/local/bin/foo
+deny	rm /opt/homebrew/foo
+deny	rm /System/Library/foo
+deny	rm /var/log/foo
+deny	rm -f /private/etc/foo
+# Hard-deny: bare root, $HOME, ~, wildcards
+deny	rm -rf /
+deny	rm -rf ~
+deny	rm -rf $HOME
+deny	rm -rf *
+deny	rm *
+# Hard-deny: .. traversal even when path looks like nsh/
+deny	rm ../etc/passwd
+deny	rm /Users/vosslab/nsh/foo/../../../etc/passwd
+deny	rm subdir/../../etc/passwd
+# Outside-zone absolute paths: not in nsh, not /tmp, not relative
+deny	rm /Users/someoneelse/Documents/foo.txt
+deny	rm ~/Documents/foo.txt
 
 # --- Local-executable allow rule (./bin/<name>(.exe)?) ---
 allow	./bin/Volume.exe --help
@@ -318,7 +379,9 @@ allow	rm _temp.py
 allow	rm -f /tmp/_scratch.sh
 allow	rm -rf __pycache__
 allow	rm -r /Users/vosslab/Library/Caches/foo
-deny	rm -rf src/
+# Bare relative paths now allowed under the rm relaxation (matches Write/Edit
+# zone). Same blast radius as overwriting the file via Write.
+allow	rm -rf src/
 deny	rm /etc/passwd
 
 # --- pip / npm / brew: more cases ---

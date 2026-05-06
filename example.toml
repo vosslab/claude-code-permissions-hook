@@ -90,12 +90,28 @@ CLAUDE_PATH = "^$HOME/\\.claude/"
 
 # --- Destructive file operations ---
 
-# Deny rm (with exceptions for safe patterns)
+# Hard-deny rm against system directories, $HOME/~/root by themselves, or
+# bare wildcards. These fire even when other rm allow rules would match.
+[[deny]]
+tool = "Bash"
+command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*(/(etc|usr|opt|System|Library|var|bin|sbin|Volumes|private|boot|dev|proc|sys|root|lib)(/|\\s|$)|/\\s*$|~\\s*$|\\$HOME(\\s|/?$)|\\*(\\s|$))"
+reason = "rm against system directories, /, ~, $HOME, or bare * is denied for safety. Use a specific path under ~/nsh/ or /tmp/."
+
+# Hard-deny rm with .. traversal. Always blocks even if other allow rules match.
+[[deny]]
+tool = "Bash"
+command_regex = "\\brm\\b[^|;&]*\\.\\.(/|\\s|$)"
+reason = "rm with .. traversal is denied. Use an explicit path inside the working tree."
+
+# Deny rm (with exceptions for safe patterns). The exclude carves out paths
+# under ~/nsh/ (matching the Write/Edit zone), /tmp/, caches, _prefix scratch
+# files, git rm, and bare relative paths starting with a letter. Hard-deny
+# rules above still block dangerous shapes regardless of this exclude.
 [[deny]]
 tool = "Bash"
 command_regex = "\\brm\\b"
-command_exclude_regex = "\\bgit\\s+rm\\b|\\brm\\s+(-[a-zA-Z]+\\s+)*/tmp/|\\brm\\s+(-[a-zA-Z]+\\s+)*\\S*[Cc]ache|\\brm\\s+(-[a-zA-Z]+\\s+)*(\\S*/)?_\\S+"
-reason = "rm is restricted. Allowed: 'git rm' for tracked files, 'rm /tmp/...' for temp files, 'rm *Cache*' for caches, 'rm _prefix' for scratch files. For other deletions, ask the user."
+command_exclude_regex = "\\bgit\\s+rm\\b|\\brm\\s+(-[a-zA-Z]+\\s+)*/tmp/|\\brm\\s+(-[a-zA-Z]+\\s+)*\\S*[Cc]ache|\\brm\\s+(-[a-zA-Z]+\\s+)*(\\S*/)?_\\S+|\\brm\\s+(-[a-zA-Z]+\\s+)*(/Users/[^/\\s]+/nsh/|~/nsh/)\\S+|\\brm\\s+(-[a-zA-Z]+\\s+)*[A-Za-z][A-Za-z0-9_./-]*"
+reason = "rm is restricted outside ~/nsh/, /tmp/, caches, _prefix scratch files, and bare relative paths. For other deletions, write a path inside ~/nsh/, prefix the file with _, or move it to /tmp/ first."
 
 # Deny sensitive file reads (.env, .secret contain credentials)
 [[deny]]
@@ -333,11 +349,23 @@ reason = "bash -c / bash -lc is redundant inside the Bash tool. Run the command 
 
 # --- Tool steering (use dedicated Claude tools instead) ---
 
-# Deny find - use the Glob tool instead
+# Deny find - use the Glob tool instead. Covers absolute-path invocations
+# (/usr/bin/find, /opt/homebrew/.../find) and command/env prefixes.
 [[deny]]
 tool = "Bash"
-command_regex = "^find\\b"
-reason = "Use the Glob tool instead of find. Example: Glob(pattern='**/*.py', path='/search/dir'). Glob supports recursive glob patterns and is faster than find."
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\b"
+reason = "Glob is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with pattern (e.g. '**/*.py') and path; it supports recursive patterns natively. For a shell-side file listing, `ls <dir>` and `git ls-files <pathspec>` stay allowed."
+
+# Deny `git grep`. Pattern: agents who hit the grep deny look for a Bash
+# escape hatch and reach for `git grep`, which would keep every search
+# shell-side instead of using the Grep tool. Uses ${GIT_INVOCATION} to
+# match every git invocation form (bare git, command git, env-prefixed,
+# absolute path /usr/bin/git, -C/-c/--git-dir/--work-tree flags); a
+# narrower regex would leave obvious bypasses.
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}grep\\b"
+reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with pattern/path/glob/output_mode/head_limit; the tool replaces every Bash search form including `git grep`."
 
 # Deny Claude Code tool names typed as Bash commands. Pattern: agents read
 # steering messages like "Use the Grep tool" and literally paste 'Grep ...'
@@ -356,7 +384,7 @@ reason = "Grep/Read/Glob/Edit/Write/Task/WebFetch/WebSearch are Claude Code TOOL
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>|]*/"
-reason = "Use the Read tool instead of cat/head/tail. Read supports offset and limit parameters for reading specific line ranges."
+reason = "Read is a Claude Code tool call (like Edit/Write). Invoke it directly with file_path and optional offset/limit; it is the canonical way to inspect a file from this harness. Pipeline forms (`... | head -5`, `... | tail -5`, `... | cat`) stay allowed for slicing piped stdout."
 
 # Deny grep/rg when searching files (any path-shaped argument, relative or absolute).
 # Pipeline leaves like 'grep pattern' (no file, filtering stdin) are not matched.
@@ -364,14 +392,14 @@ reason = "Use the Read tool instead of cat/head/tail. Read supports offset and l
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}(grep|egrep|fgrep|rg)\\b[^|]*/"
-reason = "Use the Grep tool instead of grep/egrep/fgrep/rg. Grep supports regex patterns, glob file filters, context lines (-A/-B/-C), head_limit, and output modes (content, files_with_matches, count)."
+reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with pattern/path/glob/output_mode/head_limit; the tool replaces every Bash search form. The deny covers all binaries (grep, egrep, fgrep, rg, absolute paths like /usr/bin/grep or /opt/homebrew/.../grep). Pipeline filtering of stdout (`... | grep pat`, no file argument) stays allowed for slicing piped output."
 
 # Deny absolute-path grep/rg unconditionally. Calling via absolute path
 # (/usr/bin/grep, /opt/homebrew/bin/rg) is a deliberate bypass attempt.
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}/(?:[^/\\s]+/)+(grep|egrep|fgrep|rg)\\b"
-reason = "Use the Grep tool instead of grep/egrep/fgrep/rg. Do not invoke them via absolute path."
+reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with pattern/path/glob/output_mode/head_limit; the tool replaces every Bash search form. The deny covers all binaries (grep, egrep, fgrep, rg, absolute paths like /usr/bin/grep or /opt/homebrew/.../grep). Pipeline filtering of stdout (`... | grep pat`, no file argument) stays allowed for slicing piped output."
 
 # Deny sed -n for line extraction when reading a file (path-shaped argument).
 # Pipeline leaves like '... | sed -n 250,400p' (no file, paginating stdin) are
@@ -380,7 +408,7 @@ reason = "Use the Grep tool instead of grep/egrep/fgrep/rg. Do not invoke them v
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^|]*/"
-reason = "Use the Read tool with offset and limit parameters instead of sed -n on a file. (sed -n on piped stdin is fine.)"
+reason = "Read is a Claude Code tool call. Invoke it with file_path, offset, and limit to extract a line range from a file. The pipeline form (`... | sed -n '10,20p'`) stays allowed for slicing piped stdout, where Read does not apply."
 
 # Deny bash/sh/zsh -n shell-script syntax checks. Steers agents away from using
 # shell as a script-analysis tool. Inspect with the Read tool instead.
@@ -505,6 +533,22 @@ command_exclude_regex = "${NO_CMD_SUB}"
 [[allow]]
 tool = "Bash"
 command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*(\\S*/)?_\\S+"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow rm under ~/nsh/ (matches the Write/Edit tool zone). Hard-deny rules
+# above still block .. traversal and system-directory paths.
+[[allow]]
+tool = "Bash"
+command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*(/Users/[^/\\s]+/nsh/|~/nsh/)\\S+"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow rm on bare relative paths (no leading /, ~, $, .., or *). Same blast
+# radius as Write/Edit: an agent that can Write a source file can already
+# overwrite it; rm is no more dangerous. Hard-deny rules above still block
+# .. traversal and dangerous shapes.
+[[allow]]
+tool = "Bash"
+command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*[A-Za-z][A-Za-z0-9_./-]*"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # --- ffprobe: explicit allow for the four mediainfo-cannot-do flags ---
@@ -644,7 +688,7 @@ command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CM
 
 [[allow]]
 tool = "Bash"
-command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|check-ignore|checkout|diff|grep|ls-files|ls-tree|log|mv|pull|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
+command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|check-ignore|checkout|diff|ls-files|ls-tree|log|mv|pull|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------

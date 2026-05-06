@@ -4,64 +4,36 @@
 
 ### Additions and New Features
 
-- Added a Bash deny rule that catches Claude Code tool names typed as
-  shell commands (`Grep`, `Read`, `Glob`, `Edit`, `Write`, `Task`,
-  `WebFetch`, `WebSearch`). Pattern: agents read steering messages like
-  "Use the Grep tool" and literally paste `Grep -n '^## ' docs/CHANGELOG.md`
-  into Bash, which runs nothing useful. The deny anchors at start-of-leaf
-  and the decomposer handles pipeline splitting, so mid-pipeline cases
-  are still caught without false-positiving on grep patterns that
-  enumerate tool names (e.g. `grep "Grep\|Read" file`). Added TSV
-  fixtures including the regression negative-case.
-- Updated `docs/CLAUDE_HOOK_USAGE_GUIDE.md` with: a section for the new
-  tool-name-as-Bash deny, a sed -n pipe carve-out section, a new
-  "Pipe-only commands" table summarizing the cat/head/tail, grep/rg,
-  sed -n family that are denied as the lead command but allowed when
-  filtering piped stdin, and a corresponding row in the "Common patterns"
-  table.
-- Removed the repo-local `docs/WORKTREE_POLICY.md` link from
-  `docs/CLAUDE_HOOK_USAGE_GUIDE.md` because the guide is shipped outside
-  this repository. Added a scope note clarifying that repo style
-  conventions live in the style docs.
+- Added a Bash deny rule that catches Claude Code tool names typed as shell commands (`Grep`, `Read`, `Glob`, `Edit`, `Write`, `Task`, `WebFetch`, `WebSearch`). Pattern: agents read steering messages like "Use the Grep tool" and literally paste `Grep -n '^## ' docs/CHANGELOG.md` into Bash, which runs nothing useful. The deny anchors at start-of-leaf and the decomposer handles pipeline splitting, so mid-pipeline cases are still caught without false-positiving on grep patterns that enumerate tool names (e.g. `grep "Grep\|Read" file`). Added TSV fixtures including the regression negative-case.
+- Added an explicit `git grep` deny in `claude-code-permissions-hook.toml` and `example.toml`, and dropped `grep` from the allowed git subcommand regex (now: `add|branch|check-ignore|checkout|diff|ls-files|ls-tree|log|mv|pull|remote|restore|rev-parse|show|status|worktree`). Pattern: an agent that hit the file-`grep` deny reached for `git grep` as a Bash escape hatch and stayed shell-side instead of using the Grep tool. The Grep tool is the canonical search path; `git grep` is now denied with the same three-slot reason as the file-grep rule, naming the tool's invocation parameters.
+- Tightened the `find` deny to `^${TOOL_PREFIX}${TOOL_PATH}find\b`, so absolute-path invocations (`/usr/bin/find`, `/opt/homebrew/.../find`) and command/env prefixes are caught. Previously the rule only anchored on bare `find`, leaving an obvious bypass.
+- Added decision-table coverage in `tests/command_decisions.tsv` for the new escape-hatch and deny rows: `ls /tmp`, `ls docs/`, `git ls-files`, `git ls-files '*.py'`, `git ls-files docs/` (allow); `/usr/bin/find . -name *.py` (deny, regression for the absolute-path gap); `git grep -n pattern`, `git grep -n pattern -- '*.py'`, `git -C /tmp/repo grep -n pattern` (deny).
+- Created `docs/CODE_ARCHITECTURE.md`: module map covering `src/main.rs`, `src/lib.rs`, `src/config.rs`, `src/decomposer.rs`, `src/matcher.rs`, `src/auditing.rs`, `src/hook_io.rs`, the end-to-end data flow for a Bash tool call, and extension points.
+- Created `docs/FILE_STRUCTURE.md`: top-level layout, key subtrees (src, tests, tools, docs), generated artifacts, documentation map, and where to add new work. Linked both new docs from `README.md`.
+- `docs/CLAUDE_HOOK_USAGE_GUIDE.md`: added a top-level **Bash-side reference for redirected commands** section near the Overview that tabulates each denied form, the tool call that replaces it, and the Bash forms that remain allowed (pipeline-only carve-outs, `ls`, `git ls-files`). Added a section for the tool-name-as-Bash deny, a sed -n pipe carve-out section, and a **Pipe-only commands** table summarizing the cat/head/tail, grep/rg, sed -n family that are denied as the lead command but allowed when filtering piped stdin. Added a corresponding row in the **Common patterns** table.
+- Added a compound-command note to the guide's decomposition section: a chain like `find ... ; ls ...` fails as a whole even though `ls ...` alone would have been allowed -- agents should drop the denied leaf and re-run rather than rewrite both.
 
 ### Behavior or Interface Changes
 
-- Reworded the `git stash` deny `reason` in
-  `claude-code-permissions-hook.toml` and `example.toml`. The previous
-  message ("Work directly on the current branch") didn't address the
-  common motivation -- agents reach for `git stash` to silence dirty
-  changes in `git diff`, not to switch branches. New message steers to
-  `git diff` / `git diff --staged` for inspection and to committing on
-  an `agent/<task>` branch (worktree-friendly per
-  `docs/WORKTREE_POLICY.md`) for setting work aside. Pattern unchanged.
-- Narrowed the `sed -n` deny so it only fires when sed is reading a file
-  (path-shaped argument). Previously the rule blocked any `sed -n`,
-  including legitimate piped use like `git diff ... | sed -n '250,400p'`
-  for paginating subprocess stdout, where Read cannot substitute. The
-  reason string now clarifies "sed -n on piped stdin is fine." Added
-  TSV coverage for both the deny (file arg) and allow (pipe) cases.
+- Reworded the redirect-style deny `reason` strings in `claude-code-permissions-hook.toml` and `example.toml` for the four rules that steer at a Claude Code tool call: `find` -> Glob, `cat`/`head`/`tail` -> Read, `grep`/`egrep`/`fgrep`/`rg` (relative and absolute path) -> Grep, and `sed -n` on a file -> Read. New text uses the three-slot template "<Tool> is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with <key params>. <Allowed Bash forms>." Motivated by an observed agent loop where the previous "Use the Grep tool instead of grep/egrep/fgrep/rg" message was misread as "find a different grep binary," sending the agent through `/usr/bin/grep`, `/opt/homebrew/.../grep`, then `rg`. The new strings name the tool's invocation parameters, state that the deny covers alternate binaries and absolute paths, and for `find` and the pipeline carve-outs name the legal Bash forms (`ls <dir>`, `git ls-files <pathspec>`, `... | grep pat`, `... | head -5`, `... | sed -n '10,20p'`).
+- Tightened the per-rule entries in `docs/CLAUDE_HOOK_USAGE_GUIDE.md` for `cat`/`head`/`tail`, `grep`, and `find` with the same positive-framed three-slot template (tool call + key params + allowed Bash forms). Updated the **Common patterns** intro and replaced the prior "Bash search escape hatch" row with a "Bash file listing" row that names `git ls-files` and `ls <dir>` as the real allowed forms.
+- Reworded the `git stash` deny `reason` in `claude-code-permissions-hook.toml` and `example.toml`. The previous message ("Work directly on the current branch") didn't address the common motivation -- agents reach for `git stash` to silence dirty changes in `git diff`, not to switch branches. New message steers to `git diff` / `git diff --staged` for inspection and to committing on an `agent/<task>` branch for setting work aside. Pattern unchanged.
+- Narrowed the `sed -n` deny so it only fires when sed is reading a file (path-shaped argument). Previously the rule blocked any `sed -n`, including legitimate piped use like `git diff ... | sed -n '250,400p'` for paginating subprocess stdout, where Read cannot substitute. The reason string now clarifies "sed -n on piped stdin is fine." Added TSV coverage for both the deny (file arg) and allow (pipe) cases.
+- Renamed `docs/configuration-guide.md` -> `docs/CONFIGURATION_GUIDE.md` and `docs/tool-input-schemas.md` -> `docs/TOOL_INPUT_SCHEMAS.md` via `git mv` to comply with `docs/REPO_STYLE.md` (SCREAMING_SNAKE_CASE for all docs filenames). Updated all in-repo references.
+- Tightened `README.md`: removed the prose "Protected-branch workflow" section (now linked once in the documentation list) so the README stays a short overview + doc map per the readme-fix skill.
+- Refreshed `docs/INSTALL.md` and `docs/USAGE.md`: corrected stale output JSON shape (now `{"hookSpecificOutput": {...}}`) and updated the dev-requirements blurb to reflect that pytest is for repo lint gates only, with the decision-table runner driving the hook binary.
 
-### Documentation refresh
+### Fixes and Maintenance
 
-- Renamed `docs/configuration-guide.md` -> `docs/CONFIGURATION_GUIDE.md`
-  and `docs/tool-input-schemas.md` -> `docs/TOOL_INPUT_SCHEMAS.md` via
-  `git mv` to comply with `docs/REPO_STYLE.md` (SCREAMING_SNAKE_CASE
-  for all docs filenames). Updated all in-repo references.
-- Created `docs/CODE_ARCHITECTURE.md`: module map covering
-  `src/main.rs`, `src/lib.rs`, `src/config.rs`, `src/decomposer.rs`,
-  `src/matcher.rs`, `src/auditing.rs`, `src/hook_io.rs`, the
-  end-to-end data flow for a Bash tool call, and extension points.
-- Created `docs/FILE_STRUCTURE.md`: top-level layout, key subtrees
-  (src, tests, tools, docs), generated artifacts, documentation map,
-  and where to add new work. Linked both new docs from `README.md`.
-- Tightened `README.md`: removed the prose "Protected-branch workflow"
-  section (now linked once in the documentation list as
-  `docs/WORKTREE_POLICY.md`) so the README stays a short overview +
-  doc map per the readme-fix skill.
-- Refreshed `docs/INSTALL.md` and `docs/USAGE.md`: corrected stale
-  output JSON shape (now `{"hookSpecificOutput": {...}}`) and updated
-  the dev-requirements blurb to reflect that pytest is for repo lint
-  gates only, with the decision-table runner driving the hook binary.
+- Reworked the `git grep` deny regex from inline `^${TOOL_PREFIX}git\s+(-C\s+\S+\s+)?grep\b` to `.*${GIT_INVOCATION}grep\b`, matching the pattern every other git deny rule (`stash`, `clean`, force-push, etc.) already uses. The previous regex only handled bare `git -C <path> grep` and would not catch `command git grep`, `env X=y git grep`, `/usr/bin/git grep`, `git -c core.pager=cat grep`, or `git --git-dir=.git grep`. Independent reviewers (Style + Test) flagged the gap; the bypass is now closed and the rule is consistent with neighbors.
+- Added decision-table coverage for the bypass forms the new regex now catches: `command git grep -n pat`, `env X=y git grep -n pat`, `/usr/bin/git grep -n pat`, `git -c core.pager=cat grep -n pat`.
+- Synced the `sed -n` and `git grep` deny-rule comment blocks in the live config (`~/nsh/junk-drawer/CODEX/claude/claude-code-permissions-hook.toml`) to match the longer, more accurate comments in `example.toml`. The live config previously had a stale two-line `sed -n` comment that omitted the stdin-pagination carve-out and a `git grep` comment with vestigial "mid-pipeline" wording copied from the old tool-name deny block.
+- Reframed the `git grep` deny `reason` to drop the misleading "pipeline filtering of stdout stays allowed" sentence. The pipeline carve-out is a property of the decomposer's pipe-splitting, not of this rule's regex; mentioning it in this rule's reason could mislead someone debugging why a pipeline case fired.
+- Merged the two redundant `find . -name "*.py"` rows in `docs/CLAUDE_HOOK_USAGE_GUIDE.md` **Common patterns** table into a single row that names both the Glob tool (canonical fix) and the allowed Bash forms (`ls <dir>`, `git ls-files <pathspec>`).
+- Added a `### \`git grep\`` subsection to the guide's **Denied commands** list, mirroring the per-rule format used by the other redirect-style denies. Agents reading the guide cold now see that `git grep` is explicitly denied and what the alternative is.
+- Relaxed the `rm` deny in `claude-code-permissions-hook.toml` and `example.toml` to allow paths under `~/nsh/` (the same zone the Write/Edit tools already operate in) and bare relative paths. Same blast radius as Write -- an agent that can Write a source file can already overwrite it; rm is no more dangerous. Motivated by an observed loop where the agent had explicit user approval to delete two specific files (`Final_Exam/Final_Exam_2A_2B_combined.{yaml,docx}`) but `rm` was hard-denied, so the agent reached for `python3 -c "import os; os.remove(...)"` -- the same kind of bypass loop the grep/find rework was meant to break. Two new hard-deny rules still block dangerous shapes regardless of the relaxation: (1) `rm` against system directories (`/etc /usr /opt /System /Library /var /bin /sbin /Volumes /private /boot /dev /proc /sys /root /lib`), bare `/`, `~`, `$HOME`, or unanchored `*`; (2) `rm` with `..` traversal anywhere in the path. Decided against switching `rm` to passthrough (which would prompt the user) because that would stall overnight autonomous runs.
+- Added decision-table coverage for the `rm` relaxation: positive cases (paths under `~/nsh/`, bare relative paths like `Final_Exam/foo.yaml` and `subdir/nested/file.txt`, `rm -rf build_output`), the existing safe patterns (`/tmp/`, `_prefix`, caches, `git rm`), the system-path hard-denies, the bare root/$HOME/wildcard hard-denies, and the `..` traversal hard-deny including the case where traversal escapes from a path that starts under `~/nsh/`. Flipped the pre-existing `deny rm -rf src/` row to `allow` since the new bare-relative-path allow rule now covers it (consistent with the new intent).
+- Fixed a stale runner reference in the `tests/command_decisions.tsv` header comment (`tests/run_command_decisions.sh` -> `tools/run_command_decisions.py`); the shell runner was deleted earlier on this date.
 
 ### Removals and Deprecations
 
