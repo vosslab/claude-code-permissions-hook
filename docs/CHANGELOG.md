@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-05-06
+
+### Documentation
+
+- Removed the repo-local `docs/WORKTREE_POLICY.md` link from
+  `docs/CLAUDE_HOOK_USAGE_GUIDE.md` because the guide is shipped outside this
+  repository.
+- Added a scope note to `docs/CLAUDE_HOOK_USAGE_GUIDE.md` clarifying that repo
+  style conventions live in the style docs.
+
 ## 2026-05-05
 
 ### Additions and New Features
