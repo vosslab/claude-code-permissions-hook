@@ -339,6 +339,17 @@ tool = "Bash"
 command_regex = "^find\\b"
 reason = "Use the Glob tool instead of find. Example: Glob(pattern='**/*.py', path='/search/dir'). Glob supports recursive glob patterns and is faster than find."
 
+# Deny Claude Code tool names typed as Bash commands. Pattern: agents read
+# steering messages like "Use the Grep tool" and literally paste 'Grep ...'
+# into Bash instead of invoking the tool. The decomposer already splits
+# leaves on |/&&/;, so we only need to anchor at start-of-leaf -- adding
+# mid-pipeline alternation here would false-positive on grep patterns
+# that happen to enumerate tool names (e.g. `grep "Grep\|Read" file`).
+[[deny]]
+tool = "Bash"
+command_regex = "^\\s*(Grep|Read|Glob|Edit|Write|Task|WebFetch|WebSearch)\\b"
+reason = "Grep/Read/Glob/Edit/Write/Task/WebFetch/WebSearch are Claude Code TOOLS, not shell commands. Invoke them directly as tool calls, not through Bash. Example: use the Grep tool with pattern='^## ', path='docs/CHANGELOG.md' instead of `Grep -n '^## ' docs/CHANGELOG.md`."
+
 # Deny cat/head/tail when reading files (any path-shaped argument).
 # Pipeline leaves like 'head -5' (no file, consuming stdin) are not matched.
 # Covers absolute-path invocations (/bin/cat) and command/env prefixes.
@@ -362,12 +373,14 @@ tool = "Bash"
 command_regex = "^${TOOL_PREFIX}/(?:[^/\\s]+/)+(grep|egrep|fgrep|rg)\\b"
 reason = "Use the Grep tool instead of grep/egrep/fgrep/rg. Do not invoke them via absolute path."
 
-# Deny sed -n for line extraction - use Read with offset and limit instead.
+# Deny sed -n for line extraction when reading a file (path-shaped argument).
+# Pipeline leaves like '... | sed -n 250,400p' (no file, paginating stdin) are
+# NOT matched and remain allowed -- Read can't substitute for stdout pagination.
 # Covers absolute-path invocations and command/env prefixes.
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b"
-reason = "Use the Read tool with offset and limit parameters instead of sed -n for extracting line ranges."
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^|]*/"
+reason = "Use the Read tool with offset and limit parameters instead of sed -n on a file. (sed -n on piped stdin is fine.)"
 
 # Deny bash/sh/zsh -n shell-script syntax checks. Steers agents away from using
 # shell as a script-analysis tool. Inspect with the Read tool instead.

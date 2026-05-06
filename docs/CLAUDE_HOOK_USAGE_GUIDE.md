@@ -349,14 +349,54 @@ is still allowed.
 
 **Instead:** Use `Glob(pattern='**/*.py', path='/search/dir')`.
 
-### `sed -n`
+### `sed -n` with file paths
 
 **Blocked:** `sed -n '10,20p' file.txt`
 
-**Why:** The Read tool with offset and limit does this better.
+**Allowed (pipe usage):** `git diff HEAD -- file.py | sed -n '250,400p'`
+-- paginating subprocess stdout is fine; Read can't substitute for it.
 
-**Instead:** Use `Read(file_path='file.txt', offset=10, limit=11)`.
+**Why:** The Read tool with offset and limit does file reads better, but sed
+is the right tool for slicing piped stdout.
+
+**Instead (file case):** Use `Read(file_path='file.txt', offset=10, limit=11)`.
 Other sed operations (substitution, etc.) are allowed.
+
+### Claude Code tool names typed as Bash commands
+
+**Blocked:** `Grep -n "^## " docs/CHANGELOG.md`, `Read README.md`,
+`Glob "**/*.py"`, `Edit file.py`, `Write /tmp/x.py`. Also caught when
+chained or piped, since the decomposer splits leaves before matching:
+`echo hi && Read README.md`, `cat /tmp/x | Grep foo`.
+
+A grep pattern that *contains* a tool name is not affected:
+`grep "Grep\|Read" file` is allowed (the deny anchors at start-of-leaf,
+so only the lowercase `grep` token matters).
+
+**Why:** `Grep`, `Read`, `Glob`, `Edit`, `Write`, `Task`, `WebFetch`, and
+`WebSearch` are Claude Code TOOLS, not shell commands. Pasting the tool
+name into Bash runs whatever (if anything) is on `PATH` by that name --
+not the actual tool.
+
+**Instead:** Invoke the tool directly as a tool call with its real
+parameters (e.g., the Grep tool with `pattern='^## '`,
+`path='docs/CHANGELOG.md'`).
+
+### Pipe-only commands (allowed in pipes, denied as the lead command)
+
+These tools have a "use the dedicated tool instead" deny when run against
+a file path, but remain allowed when consuming piped stdin:
+
+| Command | Denied (lead) | Allowed (in pipe) |
+| --- | --- | --- |
+| `cat`, `head`, `tail` | `cat /tmp/x.txt` | `... \| head -5` |
+| `grep`, `egrep`, `fgrep`, `rg` | `grep pat /tmp/x.txt` | `... \| grep pat` |
+| `sed -n` | `sed -n '10,20p' /tmp/x.txt` | `... \| sed -n '10,20p'` |
+
+The decomposer splits Bash commands on `|`/`&&`/`;` and evaluates each
+leaf independently. A pipeline leaf with no file path argument matches
+the "safe utility" allow list; the same command with a file argument
+hits a deny that steers to the Read or Grep tool.
 
 ### `tsc` via `node_modules` paths
 
@@ -612,6 +652,7 @@ interactive UI dialogs, causing blank answers or skipped consent screens.
 | Run Python | `python3 script.py` | `source source_me.sh && python3 script.py` |
 | Read a file | `cat /path/to/file.py` | Read tool: `file_path="/path/to/file.py"` |
 | Search files | `grep -r "pattern" src/` | Grep tool: `pattern="pattern"`, `path="src/"` |
+| Tool name as Bash | `Grep -n "^## " docs/CHANGELOG.md` | Invoke the Grep tool directly (not via Bash) |
 | Find files | `find . -name "*.py"` | Glob tool: `pattern="**/*.py"` |
 | Read lines 10-20 | `sed -n '10,20p' file.txt` | Read tool: `offset=10`, `limit=11` |
 | Delete temp file | `rm temp.py` | Name it `_temp.py`, then `rm _temp.py` |

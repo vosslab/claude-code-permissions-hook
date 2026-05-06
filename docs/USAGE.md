@@ -46,7 +46,7 @@ echo '{"session_id":"s1","transcript_path":"/tmp/t","cwd":"/home/user","hook_eve
 Output (allowed):
 
 ```json
-{"decision":"allow","reason":"Bash rule: command matches ^cargo (build|test|check|clippy|fmt|run)"}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Matched rule for Bash with command: cargo test"},"suppressOutput":true}
 ```
 
 ### Deny a dangerous command
@@ -59,7 +59,7 @@ echo '{"session_id":"s1","transcript_path":"/tmp/t","cwd":"/home/user","hook_eve
 Output (denied):
 
 ```json
-{"decision":"deny","reason":"Bash rule: command matches ^rm .*-rf"}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"..."},"suppressOutput":true}
 ```
 
 ### Passthrough (no output)
@@ -82,23 +82,25 @@ JSON object with these fields:
 | `tool_name` | string | Tool being invoked (Bash, Read, Write, Edit, etc.) |
 | `tool_input` | object | Tool-specific parameters |
 
-See [docs/tool-input-schemas.md](tool-input-schemas.md) for per-tool input fields.
+See [docs/TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md) for per-tool input fields.
 
 ### Output (stdout)
 
-JSON object when a rule matches:
+JSON object when a rule matches, wrapped in Claude Code's hook output schema:
 
 ```json
-{"decision": "allow", "reason": "..."}
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "..."
+  },
+  "suppressOutput": true
+}
 ```
 
-or
-
-```json
-{"decision": "deny", "reason": "..."}
-```
-
-No output on passthrough.
+`permissionDecision` is one of `allow` or `deny`. No stdout output on
+passthrough -- Claude Code then falls back to its normal permission flow.
 
 ### Audit files
 
@@ -115,13 +117,16 @@ Rust unit and integration tests:
 cargo test
 ```
 
-Python integration tests (requires pytest):
+Decision-table regression (runs every row in
+[tests/command_decisions.tsv](../tests/command_decisions.tsv) against the
+live config and `example.toml`; intentionally outside pytest):
 
 ```bash
-source source_me.sh && python3 -m pytest tests/test_hook.py -v
+source source_me.sh && python3 tools/run_command_decisions.py
+source source_me.sh && python3 tools/run_command_decisions.py ffprobe  # filter
 ```
 
 ## Known gaps
 
 - [ ] Document supported tool names exhaustively (currently inferred from
-  [docs/tool-input-schemas.md](tool-input-schemas.md)).
+  [docs/TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md)).

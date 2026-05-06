@@ -331,5 +331,5 @@ subagent_type = "codebase-analyzer"
 
 ## See Also
 
-- [Tool Input Schemas](./tool-input-schemas.md) - Complete reference for all Claude Code tool inputs
+- [docs/TOOL_INPUT_SCHEMAS.md](./TOOL_INPUT_SCHEMAS.md) - complete reference for all Claude Code tool inputs
 - [example.toml](../example.toml) - Working example configuration

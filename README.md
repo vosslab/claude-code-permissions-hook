@@ -21,29 +21,26 @@ Register the hook by pointing a `PreToolUse` entry in `.claude/settings.json` at
 the binary with `--config /path/to/config.toml`. See [docs/INSTALL.md](docs/INSTALL.md)
 for the full settings block.
 
-## Protected-branch workflow: agents prepare, humans commit
-
-The hook enforces a split-responsibility model: agents work on feature branches
-and prepare merges with `git merge --no-commit --no-ff`, while humans review the
-staged result and run the final commit. Protected branches (default `main`, `master`)
-block agents from committing directly; agents commit freely on their own branches.
-See [docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md) for the full workflow,
-allowed/denied table, configuration, and security model.
-
 ## Documentation
 
 - [docs/INSTALL.md](docs/INSTALL.md): requirements, build steps, hook registration
 - [docs/USAGE.md](docs/USAGE.md): CLI reference, input/output format, examples
-- [docs/configuration-guide.md](docs/configuration-guide.md): rule syntax for each tool
-- [docs/tool-input-schemas.md](docs/tool-input-schemas.md): Claude Code tool input JSON reference
+- [docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md): rule syntax for each tool
+- [docs/TOOL_INPUT_SCHEMAS.md](docs/TOOL_INPUT_SCHEMAS.md): Claude Code tool input JSON reference
+- [docs/CODE_ARCHITECTURE.md](docs/CODE_ARCHITECTURE.md): components, modules, data flow
+- [docs/FILE_STRUCTURE.md](docs/FILE_STRUCTURE.md): directory map, where to add new work
 - [docs/CLAUDE_HOOK_USAGE_GUIDE.md](docs/CLAUDE_HOOK_USAGE_GUIDE.md): allowed/denied patterns for AI agents
+- [docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md): protected-branch workflow (agents prepare, humans commit)
 - [docs/CHANGELOG.md](docs/CHANGELOG.md): chronological record of changes
 - [example.toml](example.toml): starter config with deny/allow rules and variables
 
 ## Testing
 
-    cargo test
-    source source_me.sh && python3 -m pytest tests/test_hook.py -v
+    cargo test                                       # Rust unit + integration tests
+    source source_me.sh && python3 tools/run_command_decisions.py
+                                                     # decision-table regression
+                                                     # against live + example configs
+    source source_me.sh && python3 -m pytest tests/  # repo-wide Python lint gates
 
 ## License
 
