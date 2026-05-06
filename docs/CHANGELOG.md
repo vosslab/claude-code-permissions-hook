@@ -26,6 +26,14 @@
 
 ### Behavior or Interface Changes
 
+- Reworded the `git stash` deny `reason` in
+  `claude-code-permissions-hook.toml` and `example.toml`. The previous
+  message ("Work directly on the current branch") didn't address the
+  common motivation -- agents reach for `git stash` to silence dirty
+  changes in `git diff`, not to switch branches. New message steers to
+  `git diff` / `git diff --staged` for inspection and to committing on
+  an `agent/<task>` branch (worktree-friendly per
+  `docs/WORKTREE_POLICY.md`) for setting work aside. Pattern unchanged.
 - Narrowed the `sed -n` deny so it only fires when sed is reading a file
   (path-shaped argument). Previously the rule blocked any `sed -n`,
   including legitimate piped use like `git diff ... | sed -n '250,400p'`

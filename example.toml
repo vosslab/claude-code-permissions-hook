@@ -123,7 +123,7 @@ reason = "Destructive podman operations (force removal, prune, kill, force stop)
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}stash\\b"
-reason = "Do not use git stash. Work directly on the current branch. If you need to preserve changes, ask the user."
+reason = "git stash hides work and can lose it. To inspect changes without hiding them, use `git diff` and `git diff --staged`. To set work aside, commit it on an `agent/<task>` branch (a worktree works well) instead of stashing."
 
 # Deny git clean (destructive, removes untracked files)
 [[deny]]
