@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-05-08
+
+### Additions and New Features
+
+- Added two Bash deny rules in `claude-code-permissions-hook.toml` and `example.toml` that block wholesale-discard forms of `git restore` and `git checkout`: any invocation whose pathspec is `.` or `:/`. Covers `git restore .`, `git restore :/`, `git restore --staged --worktree .`, `git restore --source=HEAD .`, `git checkout .`, `git checkout -- .`, `git checkout HEAD -- .`, `git checkout main -- .`, `git checkout :/`, and `git checkout -- :/`. These have the same blast radius as `git reset --hard` -- they wipe every uncommitted change and unstage all renames in one shot. Motivated by an observed incident where an agent ran `git restore .` (or equivalent) in a separate repo and destroyed staged renames, cross-reference rewrites, and changelog updates that lived only in the index + worktree. Single-file forms (`git restore path/to/file.py`, `git checkout -- one_file.py`) and branch switches (`git checkout main`, `git checkout -b feature/x`) remain allowed unchanged.
+- Added decision-table coverage in `tests/command_decisions.tsv` for the new denies (10 deny rows for the wholesale-discard shapes, 4 allow rows for single-file and branch-switch forms).
+- Added `fsck`, `reflog`, and `cat-file` to the git subcommand allowlist regex in both configs. All three are read-only and directly support the recovery flow agents need after an accidental wipe (`git fsck --lost-found` to surface dangling objects, `git reflog` to find prior index states, `git cat-file -p <blob>` to read recovered content). Without these on the allowlist, the very recovery commands an agent would reach for after a wipe were stuck behind passthrough prompts. Added 6 allow fixtures covering bare and `-C` invocations. Total fixtures now: 883 cases passing across both configs.
+
+### Behavior or Interface Changes
+
+- Added a `### git restore .` and `git checkout -- .` section to `docs/CLAUDE_HOOK_USAGE_GUIDE.md` placed alongside the `git push --force` rule, listing every blocked shape, the rationale (wipes uncommitted work, unstages renames), and the allowed alternatives.
+
+### Decisions and Failures
+
+- Investigated `/tmp/claude-passthrough.json` (1418 entries) at the user's request. Roughly 80% of traffic was synthetic (torture-corpus rotations at 54x/108x batches and hook self-test runs); the rest was real. Identified the wholesale-discard gap above as the highest-priority real-traffic finding -- `git checkout` and `git restore` were both on the git allowlist with no shape filtering, so any of `git restore .`, `git restore --staged --worktree .`, `git checkout -- .`, etc. auto-allowed despite having `git reset --hard`-equivalent blast radius. Other findings flagged for follow-up but not addressed in this commit: tighten abs-path `find`/`grep` denies (already partially done), verify `for`/`while`/`VAR=$(...)` denies are firing as documented, and decide policy for Read of `~/Documents/**` and `/Volumes/**` user data.
+
 ## 2026-05-06
 
 ### Additions and New Features

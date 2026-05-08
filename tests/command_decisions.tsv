@@ -293,7 +293,17 @@ allow	./tools/runner.py
 allow	git branch
 allow	git branch -a
 allow	git checkout main
+allow	git checkout -b feature/x
+allow	git checkout -- one_file.py
+allow	git checkout HEAD~1 -- file.py
 allow	git restore file.py
+allow	git restore --staged path/to/file.py
+allow	git fsck
+allow	git fsck --lost-found
+allow	git reflog
+allow	git reflog show HEAD
+allow	git cat-file -p abc123
+allow	git -C /tmp/repo fsck --lost-found
 allow	git ls-files
 allow	git ls-tree HEAD
 allow	git rev-parse --show-toplevel
@@ -313,6 +323,20 @@ deny	git reset --hard HEAD~1
 deny	git push --force-with-lease origin main
 deny	git rebase -i HEAD~3
 deny	git rebase main
+
+# --- Git: wholesale-discard forms (restore/checkout with `.` or `:/`) ---
+# Same blast radius as `git reset --hard`: wipes uncommitted work and
+# unstages renames. Single-file forms above remain allowed.
+deny	git restore .
+deny	git restore :/
+deny	git restore --staged --worktree .
+deny	git restore --source=HEAD .
+deny	git checkout .
+deny	git checkout -- .
+deny	git checkout HEAD -- .
+deny	git checkout main -- .
+deny	git checkout :/
+deny	git checkout -- :/
 
 # --- Cargo: more allowed and passthrough cases ---
 allow	cargo clippy

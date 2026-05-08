@@ -147,6 +147,28 @@ tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}clean\\b"
 reason = "git clean is destructive and removes untracked files. Use targeted rm or manual cleanup instead."
 
+# Deny wholesale-discard forms of git restore.
+# Matches `git restore .`, `git restore :/`, `git restore --staged --worktree .`,
+# `git restore --source=HEAD .`, etc. The `.` / `:/` pathspec selects every
+# tracked file and unstages all renames, silently destroying uncommitted agent
+# work. Single-file forms (`git restore path/to/file.py`) remain allowed by
+# the git allowlist.
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}restore\\b[^|;&]*\\s(?:\\.|:/)(?:\\s|$)"
+reason = "git restore with `.` or `:/` discards every tracked change in one shot and unstages renames, destroying uncommitted work. To discard a single file, use `git restore path/to/file`. To inspect changes, use `git diff` and `git diff --staged`. If you really want to wipe everything, ask the user to run it themselves."
+
+# Deny wholesale-discard forms of git checkout.
+# Matches `git checkout .`, `git checkout -- .`, `git checkout HEAD -- .`,
+# `git checkout <ref> -- .`, and `git checkout :/`. Same blast radius as
+# `git restore .` -- destroys uncommitted agent work. Branch switches
+# (`git checkout main`, `git checkout -b feature`) and single-file forms
+# (`git checkout -- one_file.py`) remain allowed.
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}checkout\\b[^|;&]*\\s(?:\\.|:/)(?:\\s|$)"
+reason = "git checkout with `.` or `:/` discards every tracked change in one shot and unstages renames, destroying uncommitted work. To discard a single file, use `git checkout -- path/to/file`. To inspect changes, use `git diff` and `git diff --staged`. If you really want to wipe everything, ask the user to run it themselves."
+
 # git reset --hard is now branch-aware: see "Deny reset --hard on protected branches" below.
 
 # Deny all force pushes (--force, -f, --force-with-lease) -- destroys remote history.
@@ -688,7 +710,7 @@ command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CM
 
 [[allow]]
 tool = "Bash"
-command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|check-ignore|checkout|diff|ls-files|ls-tree|log|mv|pull|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
+command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|cat-file|check-ignore|checkout|diff|fsck|ls-files|ls-tree|log|mv|pull|reflog|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
