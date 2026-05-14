@@ -116,13 +116,15 @@ cargo fmt --check
 
 ```bash
 bash script.sh
-bash -n script.sh        # syntax check only
 ./script.sh
 ./script.py
 ./subdir/script.py
 tools/runner.py          # bare relative-path scripts
 scripts/build.sh
 ```
+
+`bash -n script.sh` (syntax check) is denied -- inspect the script with the
+Read tool instead. See the denied commands section.
 
 ### Safe utilities
 
@@ -151,23 +153,49 @@ dedicated tools (Read, Grep, Glob) instead.
 ### Local runtimes
 
 **Node.js:**
-`node` is allowed for running `.js`, `.mjs`, and `.cjs` files, syntax checking with
-`-c` or `--check`, inline evaluation with `-e` or `--eval`, and `--version` queries.
+To get unstuck fast: use `node <script>` or `node --test <test-file>` for
+local project files. For non-trivial inline logic, write a `_temp.js` file
+and run `node _temp.js` instead of `node -e "..."`.
+
+`node` is allowed for local script execution with a known set of dev/test
+flags. Auto-allowed shape:
+`node <flags> <path>.{js,mjs,cjs,ts,tsx} [script args...]`.
+Whitelisted flags before the script: `--test`, `--watch`, `--check`, `-c`,
+`--loader=<arg>` / `--loader <arg>`, `--import=<arg>` / `--import <arg>`, and
+any short `-<letters>` flag. Arguments **after** the script path are
+intentionally allowed -- once the script is a known local file, its own argv
+is the script's concern. The match is full-command anchored (`$`), not a
+prefix match, so nothing can hide between the extension and end-of-command.
+Bare diagnostic forms `--test`, `--version`, `--help` are also allowed.
+Inline JS (`-e` / `--eval`) and unrecognized `--long-flags` (`--inspect`,
+`--experimental-*`, etc.) **passthrough** for user approval -- `node` is a
+general-purpose interpreter (shell spawn, fs, network), so inline code is the
+dangerous shape. Command substitution (`` ` ``, `$(...)`) is blocked
+unconditionally.
 
 ```bash
-node script.js
-node -c script.js
-node -e "require('./data.json')"
-node --version
+node script.js                              # allowed
+node --test tests/test_foo.mjs              # allowed
+node --loader=tsx tests/walker.mjs          # allowed
+node --loader tsx/esm --test tests/x.ts    # allowed
+node --watch script.mjs                     # allowed
+node -c script.js                           # allowed
+node --test                                 # allowed (default test glob)
+node --version                              # allowed
+node -e "require('./data.json')"            # passthrough (inline JS)
+node --eval "console.log(1)"                # passthrough (inline JS)
+node --inspect tests/x.mjs                  # passthrough (unknown long-flag)
+node --experimental-vm-modules tests/x.mjs  # passthrough
 ```
 
 **npx (whitelisted packages):**
 `npx` is allowed for a whitelist of known-safe local dev tool packages: `tsc`,
-`eslint`, `prettier`, `playwright`, `esbuild`. Unknown packages still require
-user approval (passthrough).
+`tsx`, `eslint`, `prettier`, `playwright`, `esbuild`. Unknown packages still
+require user approval (passthrough).
 
 ```bash
 npx tsc --noEmit              # allowed
+npx tsx --test tests/x.ts     # allowed (TypeScript file runner)
 npx eslint src/               # allowed
 npx prettier --check .        # allowed
 npx playwright screenshot ... # allowed
@@ -264,6 +292,12 @@ The `rm` command is denied by default, but these specific patterns are allowed:
 | `/tmp/` paths | `rm /tmp/test_output.json` |
 | Cache directories | `rm -rf __pycache__`, `rm -r ~/Library/Caches/foo` |
 | `git rm` with relative paths | `git rm old_file.py` |
+| `rmdir` (empty-dir only) | `rmdir /tmp/empty`, `rmdir src/content/old/` |
+
+`rmdir`, including `rmdir -p` (remove the empty parent chain), is allowed
+because POSIX `rmdir` only removes empty directories. It fails when any
+target directory is non-empty (no `-r`/`-R` behavior). To clean up after a
+`git mv A/* B/` chain, run `rmdir A/` to drop the now-empty source dir.
 
 ### Package managers
 
@@ -511,11 +545,17 @@ Underscore-prefixed files can be removed freely.
 
 ### `for` and `while` loops
 
-**Blocked:** `for f in *.py; do ...`, `while read line; do ...`
+**Blocked:** `for f in *.py; do ...`, `while read line; do ...`, and pipeline
+forms like `ls *.md | while read f; do ...; done` or
+`cmd; while true; do ...; done`. The deny anchors the loop keyword at
+start-of-leaf, after a `|`, `;`, or `&` character, or after a `do ` (a loop
+nested inside a `do ... done` body).
 
 **Why:** Loop logic belongs in script files, not inline Bash.
 
-**Instead:** Write the logic in a `_temp.py` or `_temp.sh` file and execute it.
+**Instead:** Write the loop into a `_temp.py` or `_temp.sh` file, run it with
+`bash _temp.sh` (or `source source_me.sh && python3 _temp.py`), then remove
+the temp file.
 
 ### `bash -c` / `bash -lc`
 
@@ -524,7 +564,18 @@ Underscore-prefixed files can be removed freely.
 **Why:** The Bash tool already runs bash. `bash -c` is redundant bash-in-bash.
 
 **Instead:** Run the command directly: `source source_me.sh && python3 script.py`.
-Running script files (`bash script.sh`, `bash -n script.sh`) is still allowed.
+Running a script file (`bash script.sh`) is still allowed. `bash -n script.sh`
+(syntax check) is denied separately -- inspect the script with the Read tool.
+
+### `bash`/`sh`/`zsh -n` (syntax check)
+
+**Blocked:** `bash -n script.sh`, `sh -n x.sh`, `zsh -n x.sh`. Covers
+absolute-path and `command`/`env` prefixes.
+
+**Why:** Steers agents away from using the shell as a script-analysis tool.
+
+**Instead:** Inspect the script with the Read tool. If you need to run it,
+use `bash script.sh` (allowed) or ask for explicit user approval.
 
 ### `sudo`
 

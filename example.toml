@@ -350,16 +350,22 @@ tool = "Bash"
 command_regex = "<<-?\\s*['\"]?\\w+"
 reason = "Do not use heredocs (<<EOF). Write code to a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
 
-# Deny for loops (force .py/.sh files for looping logic)
+# Deny for loops (force .py/.sh files for looping logic).
+# The anchor `(^|[|;&]\s*|\bdo\s+)` matches the `for` keyword at start-of-leaf,
+# after a pipe/semicolon/&/&&/||, or after a `do ` (a `for` nested inside a
+# `do ... done` body). The old `^for` anchor only matched a leaf whose first
+# token was `for` and missed these forms (observed slipping through to
+# passthrough in the log review).
 [[deny]]
 tool = "Bash"
-command_regex = "^for\\b"
+command_regex = "(^|[|;&]\\s*|\\bdo\\s+)for\\b"
 reason = "Do not use for loops in Bash tool. Write the logic in a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
 
-# Deny while loops (force .py/.sh files for looping logic)
+# Deny while loops -- same anchoring as `for` above (start-of-leaf, after
+# pipe/semicolon/&/&&/||, or after `do `).
 [[deny]]
 tool = "Bash"
-command_regex = "^while\\b"
+command_regex = "(^|[|;&]\\s*|\\bdo\\s+)while\\b"
 reason = "Do not use while loops in Bash tool. Write the logic in a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
 
 # Deny redundant bash -c / bash -lc wrappers inside the Bash tool.
@@ -573,6 +579,15 @@ tool = "Bash"
 command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*[A-Za-z][A-Za-z0-9_./-]*"
 command_exclude_regex = "${NO_CMD_SUB}"
 
+# Allow rmdir unconditionally, including `rmdir -p` (remove empty parent
+# chain). POSIX rmdir only removes empty directories; a non-empty target
+# errors out, and -p errors out at the first non-empty parent. No -r/-R
+# behavior exists. Safe drop-in for cleanup after `git mv A/* B/ && rmdir -p A/`.
+[[allow]]
+tool = "Bash"
+command_regex = "^rmdir(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
 # --- ffprobe: explicit allow for the four mediainfo-cannot-do flags ---
 # Paired with the ffprobe deny rule above. The deny's exclude lets these
 # pass; this allow makes them silent rather than passthrough.
@@ -625,33 +640,37 @@ command_exclude_regex = "${NO_CMD_SUB}"
 # so these rules match both prefixed and non-prefixed forms.
 # -------------------------------------------------------------------
 
-# node running local JS files (.js, .mjs, .cjs)
+# node running local scripts and common test/check/dev modes.
+# Allows local project script execution and test workflows while avoiding broad
+# inline JS execution through -e/--eval. Node is a general-purpose interpreter
+# (spawn shells, network, fs); only path-trailing forms with a known flag set
+# are auto-allowed. Bare -e/--eval and unrecognized --long-flags passthrough.
+# Allowed flag tokens before the trailing script path:
+#   --test, --watch, --check, -c, --loader(=|<space>)<arg>,
+#   --import(=|<space>)<arg>, any short -<letters> flag.
+# Allowed script extensions: .js .mjs .cjs .ts .tsx
+# The trailing `(\s.*)?$` intentionally allows arbitrary script arguments
+# AFTER the script path (e.g. `node app.js --port 3000`): once the script
+# itself is an allowed local file, its own argv is the script's concern, not
+# the hook's. The `$` anchor means the match is full-command, not a prefix --
+# nothing unexpected can hide between the extension and end-of-leaf.
 [[allow]]
 tool = "Bash"
-command_regex = "^node\\s+(-[a-zA-Z]+\\s+)*[A-Za-z0-9_./-]+\\.(js|mjs|cjs)\\b"
+command_regex = "^node\\s+((--test|--watch|--check|-c|--loader(=|\\s+)\\S+|--import(=|\\s+)\\S+|-[a-zA-Z]+)\\s+)*[A-Za-z0-9_./-]+\\.(js|mjs|cjs|ts|tsx)(\\s.*)?$"
 command_exclude_regex = "${NO_CMD_SUB}"
 
-# node -c / --check for syntax checking (read-only)
+# Bare diagnostic / no-script forms: node --test (runs default test glob),
+# node --version, node --help.
 [[allow]]
 tool = "Bash"
-command_regex = "^node\\s+(-c|--check)\\s"
-
-# node -e / --eval for quick inline evaluation (JSON validation, etc.)
-[[allow]]
-tool = "Bash"
-command_regex = "^node\\s+(-e|--eval)\\s"
+command_regex = "^node\\s+(--test|--version|--help)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
-
-# node --version (info only)
-[[allow]]
-tool = "Bash"
-command_regex = "^node\\s+--version"
 
 # npx with known-safe local dev tool packages only.
 # Unknown packages still passthrough to user prompt.
 [[allow]]
 tool = "Bash"
-command_regex = "^npx\\s+(tsc|eslint|prettier|playwright|esbuild)(\\s|$)"
+command_regex = "^npx\\s+(tsc|tsx|eslint|prettier|playwright|esbuild)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # eslint -- local code linter (read-only analysis)

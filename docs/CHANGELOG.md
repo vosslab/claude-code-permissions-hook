@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-05-14
+
+### Fixes and Maintenance
+
+- Polished `docs/CLAUDE_HOOK_USAGE_GUIDE.md` for coders who just want to get unstuck (it was accurate but policy-heavy). Added a short "what to do" lead to the Node.js subsection (`node <script>` / `node --test <test-file>`; write `_temp.js` instead of `node -e`); clarified that `rmdir -p` is allowed and that `rmdir` fails on non-empty targets; made the `for`/`while` "Instead" line a concrete run-the-temp-file recipe. No rule changes -- documentation only.
+- Fixed stale `bash -n` claims in `docs/CLAUDE_HOOK_USAGE_GUIDE.md`. The Shell scripts allowed block listed `bash -n script.sh` as allowed and the `bash -c` deny section claimed `bash -n script.sh` was "still allowed", but the live config denies `bash`/`sh`/`zsh -n` (steered to the Read tool) -- the doc predated that deny rule. Removed `bash -n` from the allowed block, corrected the `bash -c` section, and added a dedicated `bash`/`sh`/`zsh -n` entry to the denied commands section. Documentation only; the deny rule itself was already in place.
+- Applied audit-review fixes to the 2026-05-13 changeset (no rule-behavior changes). Corrected the `for`/`while` deny comments in both configs: the old comment claimed the shell decomposer "keeps the post-pipe segment as one leaf", an unverified mechanism claim; the comment now describes only what the anchor matches (loop keyword at start-of-leaf, after `|`/`;`/`&`, or after `do `). Fixed the same imprecision in the `for`/`while` doc section and in `tests/command_decisions.tsv`. Rewrote the misleading `node -e "$(curl ...)"` fixture comment to state the real reason (matches no allow rule and no deny rule, so it falls through to passthrough). Removed two duplicate node fixtures (`node -c script.js`, `node --version`) that were already covered by pre-existing rows. Added fixtures for the compound `git mv ... && rmdir` chain, the `find | while` form, and a `do`-nested loop. Rewrapped one over-long line in the Node.js doc subsection. Updated the stale `~440 rows` count in `docs/FILE_STRUCTURE.md` to `~490`.
+
+## 2026-05-13
+
+### Additions and New Features
+
+- Replaced the four narrow `node` allow rules (`.js/.mjs/.cjs` only, `-c`/`--check`, `-e`/`--eval`, `--version`) in `claude-code-permissions-hook.toml` and `example.toml` with two rules that allow local-script execution plus common dev/test flags. Rule 1: `node <flags> <path>.{js,mjs,cjs,ts,tsx} [script args...]` where flags are `--test`, `--watch`, `--check`, `-c`, `--loader(=|<space>)<arg>`, `--import(=|<space>)<arg>`, or any short `-<letters>` flag. The rule is anchored full-command with a `(\s.*)?$` tail so arguments after the script path are intentionally allowed (the script's own argv is the script's concern), not allowed by accidental prefix matching. Rule 2: bare `node --test`, `node --version`, `node --help`. This unblocks the Node built-in test runner and tsx/ts-node loader workflows that dominated the passthrough log. Inline JS (`-e`/`--eval`) and unrecognized `--long-flags` (`--inspect`, `--experimental-*`) are intentionally left to passthrough: `node` is a general-purpose interpreter (shell spawn, fs, network), and inline code is the dangerous shape -- a tightening over the initially-proposed `^node(\s|$)` blanket allow, which was rejected in review for auto-allowing arbitrary inline JS. Motivation: passthrough-log review (`/tmp/claude-passthrough.json`, 45 entries) showed Claude stalling on ~12 safe `node`/`npx` test-runner invocations per session.
+- Added `tsx` to the `npx` whitelist alongside `tsc`, `eslint`, `prettier`, `playwright`, `esbuild`. `npx tsx` is the standard TypeScript file runner (analog to `npx tsc`) used by Node test suites.
+- Added `^rmdir(\s|$)` allow rule in both configs. POSIX `rmdir` only removes empty directories (no `-r`/`-R` behavior); a non-empty target errors out. Unblocks `git mv A/* B/ && rmdir A/` cleanup chains that previously hit passthrough on the trailing `rmdir`. ~10 such chains were logged.
+- Added new fixtures to `tests/command_decisions.tsv` covering the tightened node allow (script-trailing allow rows, inline-JS and unknown-long-flag passthrough rows), the `tsx` whitelist addition, the `rmdir` allow, and the tightened `for`/`while` deny anchoring. Both `example.toml` and the live symlinked config were updated in the same session, so all fixtures pass against both.
+
+### Behavior or Interface Changes
+
+- Tightened the `for` and `while` deny anchors from `^for\b` / `^while\b` to `(^|[|;&]\s*|\bdo\s+)for\b` and the same for `while`. Catches pipeline forms like `ls *.md | while read f; do grep pat "$f"; done`, sequenced forms `cmd; while ...`, conjunction forms `cmd && for ...`, and nested loops `do for ...`. Motivation: passthrough log showed three file-grep-in-loop forms slipping through despite policy stating loops are denied. Root cause: the shell decomposer keeps `lead | while ...; do ...; done` as one leaf starting with `lead`, so an unanchored `^while` could not match.
+- Updated `docs/CLAUDE_HOOK_USAGE_GUIDE.md`: rewrote the Node.js subsection in "Local runtimes" to document the script-trailing allow shape, the whitelisted flag set, and the inline-JS / unknown-long-flag passthrough behavior; added `tsx` to the npx whitelist code block; added an `rmdir` row to the "File deletion (safe patterns)" table; tightened the `for` and `while` loop description to call out the new pipeline-form coverage.
+
+### Decisions and Failures
+
+- Reviewed `/tmp/claude-passthrough.json` (45 entries) at the user's request. By-design passthroughs (ExitPlanMode 8, AskUserQuestion 2, `npm install` 1) accounted for 24%; the rest were almost entirely safe operations that should have been auto-allowed. No security-relevant passthroughs.
+- Rejected an initial `^node(\s|$)` blanket-allow proposal in review. It would have auto-allowed arbitrary inline JS via `-e`/`--eval` -- `node` can spawn shells, touch the filesystem, and make network requests, so inline code is the real danger (unlike `npx`, the risk is not just remote-package fetch). Final rule allows only script-trailing forms with a whitelisted flag set and leaves `-e`/`--eval` plus unknown `--long-flags` to passthrough.
+- Deferred two findings: (1) widening the Read allow zone for `/Users/vosslab/cell-culture-game-claude/` -- one Read attempt out of 45, user confirms these are coder-CWD-confusion symptoms and leaving them as passthrough is the right shape; (2) decomposer behavior on `wc -l $(git ls-files src/ | grep '\.ts$')` -- single occurrence, command-substitution-as-argument; not worth a rule change yet.
+- Dropped the plan's "wrong-path steering deny" item (a deny rule for `~/claude-code-permissions-hook`, the nonexistent path coders sometimes use instead of `~/nsh/claude-code-permissions-hook`). The user confirmed that path was only an illustrative example and asked not to add the specific case, so no rule or fixture was added for it.
+
+### Developer Tests and Notes
+
+- `cargo build` clean; `cargo test` 17 passed (protected-branch integration); `pytest tests/` 142 passed.
+- `python3 tools/run_command_decisions.py`: 941 fixtures pass against both `example.toml` and the live `~/.config/claude-code-permissions-hook.toml` (both configs updated in the same session).
+
 ## 2026-05-08
 
 ### Additions and New Features

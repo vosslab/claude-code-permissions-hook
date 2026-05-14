@@ -52,7 +52,7 @@ src/
 tests/
 +- integration_test.rs          Rust integration tests using JSON fixtures
 +- test_protected_branch.rs     Rust tests for protected-branch behavior
-+- command_decisions.tsv        Decision-table regression corpus (~440 rows)
++- command_decisions.tsv        Decision-table regression corpus (~490 rows)
 +- test_config.toml             Synthetic config used by the Rust integration
 |                               tests + a small subset of TSV rows
 +- test_protected_branch_config.toml  Config for the protected-branch tests
