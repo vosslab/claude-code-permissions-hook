@@ -4,3 +4,4 @@ report*.txt
 #build folder
 target/
 report_*.txt
+_*.py

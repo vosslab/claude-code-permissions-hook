@@ -362,6 +362,45 @@ ordering (recovery path first) applies to deny subsections in
 subsection under `## Denied commands` leads with `**Instead:**`, then
 `**Why:**`, then `**Blocked:**`.
 
+### Recovery paths must be executable in the agent context
+
+The recovery action a deny reason recommends must actually be invocable by
+the agent. Log review and live tests through 2026-05-16 show that the
+Claude Code `Grep` and `Glob` tool calls are not consistently exposed in
+this agent context (a live invocation returned `No such tool available`).
+Deny reasons must not direct agents to those tool calls.
+
+GNU `grep` and `rg` are unaffected by this rule -- they remain good tools
+and stay allowed as pipeline filters on bounded stdout.
+
+Frame search/discovery denies as scope-control, not as tool replacement.
+File-path `grep`/`rg`/`find`/`git grep` is denied because the search
+space is unbounded and prone to path hallucination; the agent should
+first bound the candidate set (`git ls-files`, `ls`), then Read the
+relevant files, and use piped `grep`/`rg` to filter that bounded output.
+The fix is the workflow, not the tool.
+
+Preferred recovery paths in this context:
+
+- Read tool for file inspection (with `offset`/`limit` when appropriate).
+- Edit/MultiEdit/Write for modifications.
+- `git ls-files <pathspec>` for in-repo file discovery.
+- `ls <dir>` for shallow directory listing.
+- Piped `grep`, `rg`, `sed -n`, or `cut` for slicing stdout (pipeline
+  form stays allowed even when the file-path form is denied).
+- `_temp.py` helpers run with `source source_me.sh && python3 _temp.py`
+  for structured or broad content search. The helper must start from a
+  bounded candidate list (e.g. `git ls-files`), not reimplement
+  `grep -r` over the whole tree.
+
+If a future agent context exposes `Grep`/`Glob` reliably, revisit this
+section before re-introducing those recommendations.
+
+The maintainer rationale and evidence live here. The vendored
+`docs/CLAUDE_HOOK_USAGE_GUIDE.md` should contain only operational,
+agent-facing instructions -- short notes on what to do, not the
+underlying live-test/log-scan evidence that motivated this policy.
+
 ## See Also
 
 - [TOOL_INPUT_SCHEMAS.md](./TOOL_INPUT_SCHEMAS.md) - complete reference for all Claude Code tool inputs

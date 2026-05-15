@@ -125,17 +125,16 @@ concentrated on `Read` and `Edit`:
 - Edit: 14 both-missing events now deny immediately.
 - MultiEdit / Glob / Grep: 0 / 0 / 1 events in the same window.
 
-Glob and Grep coverage is defensive: those tools are barely exercised by
-real agent traffic in this dataset. A separate finding emerged during the
-scan -- denies that steer Bash `grep`/`find` toward the Grep/Glob tools
-almost never convert into actual Grep/Glob tool calls (534 file-grep
-denies produced 0 Grep tool calls; 222 find denies produced 0 Glob tool
-calls). Agents either retry the same Bash form on a different path,
-switch to `ls`, or fall back to Read of the whole file. That is an
-agent-side behavior issue, separate from this PR, and worth a follow-up:
-test shorter, copyable deny messages of the form
-`Use the Grep tool now: Grep(pattern="<re>", path="<file>"). Do not retry
-grep in Bash.`
+Glob and Grep coverage is defensive: those tools are barely exercised
+by real agent traffic in this dataset, and a follow-up live test
+(2026-05-16) confirmed they are not consistently exposed in the target
+Claude agent context (invoking `Grep` or `Glob` returned `No such tool
+available`). Deny messages across the hook have been revised to recommend
+`git ls-files`, `Read`, piped `grep`/`rg`, and `_temp.py` helpers
+instead of the Claude Code Grep/Glob tool calls. See the 2026-05-16
+changelog entry and `docs/CONFIGURATION_GUIDE.md` "Deny message style"
+section for the policy and rationale; the durable replay artifact lives
+at `/tmp/grep_glob_bucket_scan.txt`.
 
 ## Data flow
 

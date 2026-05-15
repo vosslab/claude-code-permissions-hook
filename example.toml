@@ -19,7 +19,7 @@ protected_refs = ["refs/heads/main", "refs/heads/master"]
 [variables]
 # --- Safe command groups (harmless utilities only, NO runtimes) ---
 # Text processing (read/transform stdin or files, no side effects)
-# awk is intentionally excluded -- denied entirely (steered to the Grep tool).
+# awk is intentionally excluded -- denied entirely (steered to git ls-files + Read, piped grep/rg, or _temp.py).
 TEXT_CMDS = "cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs"
 # Search and query (find content within text or structured data)
 SEARCH_CMDS = "grep|jq|rg"
@@ -383,34 +383,35 @@ reason = "Run the command directly -- the Bash tool already runs bash. `bash -c`
 
 # --- Tool steering (use dedicated Claude tools instead) ---
 
-# Deny find - use the Glob tool instead. Covers absolute-path invocations
-# (/usr/bin/find, /opt/homebrew/.../find) and command/env prefixes.
+# Deny find - steer to git ls-files / ls / _temp.py (scope control, not anti-find).
+# Covers absolute-path invocations (/usr/bin/find, /opt/homebrew/.../find) and
+# command/env prefixes.
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\b"
-reason = "Invoke the Glob tool: pattern='**/*.py', path=<dir>. For a shell-side file listing, `ls <dir>` and `git ls-files <pathspec>` are still allowed. `find` is rejected because Glob handles recursive patterns natively."
+reason = "Use `git ls-files <pathspec>` inside a git repo, or `ls <dir>` for a shallow listing. Use `grep` or `rg` only to filter already-bounded command output (`git ls-files | grep pat` or `git ls-files | rg pat`). For broad/structured searches write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `find` is denied because broad recursive scans produce noisy output and invite fragile parsing -- scope-control rule, not anti-find."
 
 # Deny `git grep`. Pattern: agents who hit the grep deny look for a Bash
 # escape hatch and reach for `git grep`, which would keep every search
-# shell-side instead of using the Grep tool. Uses ${GIT_INVOCATION} to
-# match every git invocation form (bare git, command git, env-prefixed,
-# absolute path /usr/bin/git, -C/-c/--git-dir/--work-tree flags); a
-# narrower regex would leave obvious bypasses.
+# shell-side instead of git ls-files + Read; piped grep/rg stays allowed.
+# Uses ${GIT_INVOCATION} to match every git invocation form (bare git,
+# command git, env-prefixed, absolute path /usr/bin/git, -C/-c/--git-dir
+# /--work-tree flags); a narrower regex would leave obvious bypasses.
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}grep\\b"
-reason = "Invoke the Grep tool: pattern=<regex>, path=<file or dir>, plus glob, output_mode, head_limit as needed. `git grep` is rejected; the Grep tool is the canonical search path."
+reason = "Use `git ls-files <pathspec>` to list candidate files, then use the Read tool on targeted files. `grep` and `rg` remain useful as pipeline filters on already-bounded command output (`git ls-files | grep pat`). For broad or structured content searches write a `_temp.py` helper that starts from a bounded candidate list (e.g. `git ls-files`) and run it with `source source_me.sh && python3 _temp.py`. `git grep` is denied to keep repo content search on the bounded workflow: list candidates first, then inspect targeted files. Scope-control rule, not anti-grep."
 
 # Deny Claude Code tool names typed as Bash commands. Pattern: agents read
-# steering messages like "Use the Grep tool" and literally paste 'Grep ...'
-# into Bash instead of invoking the tool. The decomposer already splits
-# leaves on |/&&/;, so we only need to anchor at start-of-leaf -- adding
-# mid-pipeline alternation here would false-positive on grep patterns
-# that happen to enumerate tool names (e.g. `grep "Grep\|Read" file`).
+# steering messages and literally paste tool names like 'Grep ...' or
+# 'Read ...' into Bash instead of invoking the tool. The decomposer already
+# splits leaves on |/&&/;, so we only need to anchor at start-of-leaf --
+# adding mid-pipeline alternation here would false-positive on grep
+# patterns that happen to enumerate tool names (e.g. `grep "Grep\|Read" file`).
 [[deny]]
 tool = "Bash"
 command_regex = "^\\s*(Grep|Read|Glob|Edit|Write|Task|WebFetch|WebSearch)\\b"
-reason = "Invoke the tool directly as a tool call. Example: use the Grep tool with pattern='^## ', path='docs/CHANGELOG.md' instead of typing `Grep -n '^## ' docs/CHANGELOG.md` into Bash. `Grep`/`Read`/`Glob`/`Edit`/`Write`/`Task`/`WebFetch`/`WebSearch` are Claude Code TOOLS, not shell commands -- typing them into Bash runs whatever (if anything) is on PATH by that name."
+reason = "Invoke the actual tool, not its name typed into Bash. `Read` reads a file; `Edit`/`Write` modify files; `Task`/`WebFetch`/`WebSearch` are first-class tool calls. For file search use `git ls-files <pathspec>` plus the Read tool. Typing `Grep`, `Glob`, `Read`, `Edit`, `Write`, `Task`, `WebFetch`, or `WebSearch` into Bash runs whatever (if anything) is on PATH by that name, not the Claude Code tool."
 
 # Deny cat/head/tail when reading files (any path-shaped argument).
 # Pipeline leaves like 'head -5' (no file, consuming stdin) are not matched.
@@ -435,14 +436,14 @@ reason = "Invoke the Read tool: file_path=<path>, with optional offset and limit
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(grep|egrep|fgrep|rg)\\b[^>]*/"
-reason = "Invoke the Grep tool: pattern=<regex>, path=<file or dir>, plus glob, output_mode, head_limit as needed. For piped stdout, `... | grep pat` (no file argument) is still allowed. `grep`, `egrep`, `fgrep`, `rg`, and absolute-path forms (`/usr/bin/grep`, `/opt/homebrew/.../grep`) all route to the same tool."
+reason = "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `grep` and `rg` are good tools and stay allowed as pipeline filters on already-bounded output (`git ls-files | grep pat`, `git ls-files | rg pat`, `git diff | grep pat`). For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `grep`, `egrep`, `fgrep`, `rg`, and absolute-path forms (`/usr/bin/grep`, `/opt/homebrew/.../grep`) are denied only with a file path argument -- scope-control rule, not anti-grep."
 
 # Deny absolute-path grep/rg unconditionally. Calling via absolute path
 # (/usr/bin/grep, /opt/homebrew/bin/rg) is a deliberate bypass attempt.
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}/(?:[^/\\s]+/)+(grep|egrep|fgrep|rg)\\b"
-reason = "Invoke the Grep tool: pattern=<regex>, path=<file or dir>, plus glob, output_mode, head_limit as needed. For piped stdout, `... | grep pat` (no file argument) is still allowed. `grep`, `egrep`, `fgrep`, `rg`, and absolute-path forms (`/usr/bin/grep`, `/opt/homebrew/.../grep`) all route to the same tool."
+reason = "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `grep` and `rg` are good tools and stay allowed as pipeline filters on already-bounded output (`git ls-files | grep pat`, `git ls-files | rg pat`, `git diff | grep pat`). For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `grep`, `egrep`, `fgrep`, `rg`, and absolute-path forms (`/usr/bin/grep`, `/opt/homebrew/.../grep`) are denied only with a file path argument -- scope-control rule, not anti-grep."
 
 # Deny sed -n for line extraction when reading a file (path-shaped argument).
 # Pipeline leaves like '... | sed -n 250,400p' (no file, paginating stdin) are
@@ -461,13 +462,14 @@ reason = "Invoke the Read tool: file_path=<path>, offset=<start>, limit=<count> 
 # grep/sed denies, this has no file-path guard: awk is denied even as a stdin
 # filter. Rationale: in passthrough-log review, agent awk usage was almost
 # always line-matching ("find lines matching X, print them"), which is exactly
-# the Grep tool's job, and the awk attempts were consistently overcomplicated.
-# awk's '/regex/' syntax also makes a reliable file-vs-stdin guard impractical.
+# what git ls-files + Read or a _temp.py helper covers, and the awk attempts
+# were consistently overcomplicated. awk's '/regex/' syntax also makes a
+# reliable file-vs-stdin guard impractical.
 # Covers awk, gawk, mawk via command/env prefixes and absolute paths.
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(awk|gawk|mawk)\\b"
-reason = "Invoke the Grep tool (pattern/path/glob/output_mode/head_limit) for line-matching. For field extraction, pipe through `cut`, or read with the Read tool and process in a `_temp.py` script. `awk`/`gawk`/`mawk` is rejected including pipeline leaves -- no pipe exception."
+reason = "For line-matching in files, use `git ls-files <pathspec>` to identify candidates and use the Read tool on targeted files. Piped `grep` or `rg` on already-bounded stdout stays allowed (`<allowed cmd> | grep pat`, `<allowed cmd> | rg pat`). For field extraction from piped output use `cut`. For structured parsing write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `awk`/`gawk`/`mawk` is denied including pipeline leaves -- no pipe exception."
 
 # Deny bash/sh/zsh -n shell-script syntax checks. Steers agents away from using
 # shell as a script-analysis tool. Inspect with the Read tool instead.

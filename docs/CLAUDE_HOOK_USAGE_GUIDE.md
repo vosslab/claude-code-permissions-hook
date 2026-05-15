@@ -51,22 +51,27 @@ long chains into smaller commands or write a script file.
 
 ### Bash-side reference for redirected commands
 
-`Read`, `Grep`, `Glob`, `Edit`, and `Write` are Claude Code *tool calls*,
-invoked directly with named parameters. They replace the Bash forms below.
-The third column lists the Bash forms that remain allowed for cases the tool
-calls do not cover (typically slicing piped stdout or listing files for a
-shell pipeline).
+`Read`, `Edit`, and `Write` are first-class Claude Code tool calls; use them
+by name. The Claude Code `Grep` and `Glob` tool calls are not consistently
+available in this agent context, so this guide does not rely on them as
+recovery paths. For file discovery and content search, reach for
+`git ls-files`, `ls`, the Read tool, piped `grep`/`rg`, and `_temp.py`
+helpers. `grep` and `rg` remain allowed as pipeline filters on
+already-bounded output; the deny on file-path `grep`/`rg`/`find` is a
+scope-control rule that pushes agents to bound the search space first.
+The third column lists Bash forms that remain allowed.
 
-| Denied Bash form | Tool call | Allowed Bash forms |
+| Denied Bash form | Preferred recovery | Allowed Bash forms |
 | --- | --- | --- |
-| `cat /path/to/file`, `head -20 /path`, `tail -20 /path` | `Read(file_path=..., offset=..., limit=...)` | `... \| cat`, `... \| head -5`, `... \| tail -5` (pipeline, no file arg) |
-| `grep pat /path`, `/usr/bin/grep ...`, `rg pat dir/`, `egrep`, `fgrep` | `Grep(pattern=..., path=..., glob=..., output_mode=..., head_limit=...)` | `... \| grep pat` (pipeline, no file arg) for stdout filtering |
-| `find . -name "*.py"` (any path form) | `Glob(pattern='**/*.py', path=...)` | `ls <dir>`, `git ls-files <pathspec>` |
-| `sed -n '10,20p' file.txt` | `Read(file_path=..., offset=10, limit=11)` | `... \| sed -n '10,20p'` (pipeline) |
+| `cat /path/to/file`, `head -20 /path`, `tail -20 /path` | Read tool with `file_path`, `offset`, `limit` | `... \| cat`, `... \| head -5`, `... \| tail -5` (pipeline, no file arg) |
+| `grep pat /path`, `/usr/bin/grep ...`, `rg pat dir/`, `egrep`, `fgrep` | `git ls-files <pathspec>` to list candidates, then use the Read tool on targeted files; piped `grep`/`rg` on bounded stdout; `_temp.py` (bounded candidate list) for broad search | `... \| grep pat`, `... \| rg pat` (pipeline, no file arg) for stdout filtering |
+| `find . -name "*.py"` (any path form) | `git ls-files <pathspec>` or `ls <dir>` | `ls <dir>`, `git ls-files <pathspec>` |
+| `sed -n '10,20p' file.txt` | Read tool with `offset=10`, `limit=11` | `... \| sed -n '10,20p'` (pipeline) |
 
 The deny rules cover all binary variants (alternate names, absolute paths like
 `/usr/bin/grep` or `/opt/homebrew/.../grep`, `rg`). The fastest path through a
-deny is the tool call in column two.
+deny is the preferred recovery in column two; column three covers cases where
+Bash is still the right shape.
 
 ## Allowed commands
 
@@ -148,8 +153,9 @@ These commands are allowed as single commands. Command substitution is blocked.
 
 Note: Some of these (like `cat`, `grep`, `head`, `tail`) have deny rules that block
 them when used with file path arguments. See the denied commands section. Use the
-dedicated tools (Read, Grep, Glob) instead. `awk` is not in this list at all -- it
-is denied entirely (see the `awk` denied section below).
+Read tool for file inspection, and `git ls-files <pathspec>` plus targeted Read for
+file search; piped `grep`/`rg` on already-bounded stdout stays allowed. `awk` is not
+in this list at all -- it is denied entirely (see the `awk` denied section below).
 
 ### Local runtimes
 
@@ -323,13 +329,18 @@ brew info python
 
 ### File access zones
 
+The hook may contain rules for Claude Code tools that are not exposed in
+every agent context (`Grep` and `Glob` in particular -- see notes
+below). This guide recommends only recovery paths observed to be
+available in the target context.
+
 | Tool | Allowed paths |
 | --- | --- |
 | Read | `~/nsh/`, `~/.<dotdirs>`, site-packages, `/tmp/`, `/var/folders/` |
 | Write | `~/nsh/`, `~/.claude/`, `/tmp/` |
 | Edit | `~/nsh/`, `~/.claude/`, `/tmp/` |
-| Glob | `~/nsh/`, `~/.claude/`, `/tmp/` |
-| Grep | `~/nsh/`, `~/.claude/`, `/tmp/` |
+| Glob | Supported defensively when exposed by Claude Code; not a standard recovery path in this agent context |
+| Grep | Supported defensively when exposed by Claude Code; not a standard recovery path in this agent context |
 
 All file tools block path traversal (`..`). Reading `.env` and `.secret` files is denied.
 
@@ -395,14 +406,19 @@ this harness.
 
 ### `grep`/`rg` with file paths
 
-**Instead:** Invoke the Grep tool directly with `pattern`, `path`, `glob`,
-`-A`/`-B`/`-C`, `output_mode`, and `head_limit`. The pipeline form
-(`... | grep pat`) stays allowed for slicing piped stdout, where Grep does
-not apply.
+**Instead:** Use `git ls-files <pathspec>` to identify candidate files,
+then use the Read tool on the relevant files. `grep` and `rg` remain
+allowed as pipeline filters on already-bounded command output
+(`git ls-files | grep pat`, `git ls-files | rg pat`, `git diff | grep pat`).
+For broad or structured searches, write a `_temp.py` helper that starts
+from a bounded candidate list (e.g. `git ls-files`) and run it with
+`source source_me.sh && python3 _temp.py`.
 
-**Why:** Grep is a Claude Code tool call (like Read/Edit/Write). It supplies
-structured output modes, glob filters, and context lines, and is the
-canonical way to search files from this harness.
+**Why:** Scope control. File-path `grep`/`rg` is prone to broad,
+unbounded scans and path hallucination. Bounding the candidate set
+first (`git ls-files`, `ls`) then filtering or inspecting targeted
+files is the discipline this rule pushes. This is not an anti-`grep`
+rule -- piped `grep`/`rg` on bounded stdout is encouraged.
 
 **Blocked:** `grep pattern /path/to/file`, `rg pattern /abs/search/dir`,
 `/usr/bin/grep ...`, `/opt/homebrew/.../grep ...`, `egrep`, `fgrep`. The
@@ -410,14 +426,17 @@ deny covers all binary names and absolute paths.
 
 ### `git grep`
 
-**Instead:** Invoke the Grep tool directly with `pattern`, `path`, `glob`,
-`-A`/`-B`/`-C`, `output_mode`, and `head_limit`. There is no Bash escape
-hatch for repo searches. For Bash file listings, `ls <dir>` and
-`git ls-files <pathspec>` remain allowed.
+**Instead:** Use `git ls-files <pathspec>` to list candidate files, then
+use the Read tool on targeted files. For broad or structured searches,
+write a `_temp.py` helper that starts from a bounded candidate list
+(e.g. `git ls-files`) and run it with
+`source source_me.sh && python3 _temp.py`. Piped `grep`/`rg` filtering
+of bounded output remains allowed.
 
-**Why:** Grep is a Claude Code tool call (like Read/Edit/Write); `git grep`
-would keep every search shell-side and re-create the loop the file-`grep`
-deny is meant to break. The Grep tool is the canonical search path.
+**Why:** Scope control. `git grep` keeps content search inside a
+shell-side repo scan; the bounded-input discipline is to list
+candidates first, then inspect targeted files. Not an anti-`grep`
+rule -- piped `grep`/`rg` on bounded stdout stays allowed.
 
 **Blocked:** `git grep <pattern>`, including all git invocation forms
 (`/usr/bin/git grep`, `command git grep`, `env X=y git grep`,
@@ -426,25 +445,35 @@ deny is meant to break. The Grep tool is the canonical search path.
 
 ### `find`
 
-**Instead:** Invoke the Glob tool directly with `pattern='**/*.py'` and `path`.
-For a shell-side file listing, `ls <dir>` and `git ls-files <pathspec>` are
-both allowed.
+**Instead:** Use `git ls-files <pathspec>` inside a git repo, or
+`ls <dir>` for a shallow listing. Use `grep` or `rg` only to filter
+already-bounded command output (`git ls-files | grep pat` or
+`git ls-files | rg pat`). For broad/structured searches, write a
+`_temp.py` helper that starts from a bounded candidate list (e.g.
+`git ls-files`) and run it with
+`source source_me.sh && python3 _temp.py`.
 
-**Why:** Glob is a Claude Code tool call (like Read/Edit/Write) and supports
-recursive patterns directly.
+**Why:** Scope control. Broad recursive `find` scans produce noisy
+output and invite fragile parsing; agents should bound the candidate
+set first.
 
 **Blocked:** `find . -name "*.py"`, including absolute-path invocations.
 
 ### `awk`
 
-**Instead:** For line-matching, invoke the Grep tool with `pattern`, `path`,
-`glob`, `output_mode`, and `head_limit`. For genuine field extraction, pipe
-the source through `cut`, or read the file with the Read tool and process it
-in a `_temp.py` script.
+**Instead:** For line-matching in files, use `git ls-files <pathspec>`
+to identify candidates and use the Read tool on targeted files. Piped
+`grep` or `rg` on already-bounded stdout stays allowed
+(`<allowed cmd> | grep pat`, `<allowed cmd> | rg pat`). For field
+extraction from piped output use `cut`. For structured parsing, write a
+`_temp.py` helper that starts from a bounded candidate list (e.g.
+`git ls-files`) and run it with
+`source source_me.sh && python3 _temp.py`.
 
-**Why:** Almost all agent `awk` usage is line-matching ("find lines matching X,
-print them"), which the Grep tool does directly. `awk`'s `/regex/` syntax also
-makes a reliable file-vs-stdin guard impractical, so the deny is unconditional.
+**Why:** Almost all agent `awk` usage is line-matching ("find lines
+matching X, print them"), which `git ls-files` + Read or a `_temp.py`
+helper covers. `awk`'s `/regex/` syntax also makes a reliable
+file-vs-stdin guard impractical, so the deny is unconditional.
 
 **Blocked:** All `awk` invocations -- `awk '/pat/{print}' file`, `awk '{print $2}'`,
 `gawk`, `mawk`, absolute-path and `command`/`env`-prefixed forms, and pipeline
@@ -466,8 +495,10 @@ is the right tool for slicing piped stdout.
 
 ### Claude Code tool names typed as Bash commands
 
-**Instead:** Invoke the tool directly as a tool call with its real parameters
-(e.g., the Grep tool with `pattern='^## '`, `path='docs/CHANGELOG.md'`).
+**Instead:** Invoke the actual tool, not its name typed into Bash. `Read`
+reads a file; `Edit`/`Write` modify files; `Task`/`WebFetch`/`WebSearch`
+are first-class tool calls. For file search use `git ls-files <pathspec>`
+plus the Read tool.
 
 **Why:** `Grep`, `Read`, `Glob`, `Edit`, `Write`, `Task`, `WebFetch`, and
 `WebSearch` are Claude Code TOOLS, not shell commands. Pasting the tool
@@ -500,7 +531,7 @@ a file path, but remain allowed when consuming piped stdin:
 The decomposer splits Bash commands on `|`/`&&`/`;` and evaluates each
 leaf independently. A pipeline leaf with no file path argument matches
 the "safe utility" allow list; the same command with a file argument
-hits a deny that steers to the Read or Grep tool.
+hits a deny that steers toward piped forms, the Read tool, or `_temp.py` scripts.
 
 ### `tsc` via `node_modules` paths
 
@@ -749,6 +780,12 @@ are unaffected -- only the `-c` inline-code form is denied.
 
 ## Path existence pre-check
 
+The pre-check primarily benefits `Read`, `Edit`, and `MultiEdit` (where
+adoption is 100% in observed traffic). When Claude Code also exposes
+`Glob` or `Grep` tool calls, the hook checks their `path` field
+defensively; those tools are not relied on as standard recovery paths
+in this agent context.
+
 Before evaluating any allow or deny rule, the hook stats the target path of
 `Read`, `Edit`, `MultiEdit`, `Glob`, and `Grep` calls and denies the call
 outright when the path is missing or unusable for the tool. This catches the
@@ -782,7 +819,7 @@ cwd fallback is trusted).
 | Condition | Reason |
 | --- | --- |
 | Read target missing | `Verify the file path before retrying. Read target does not exist: <path>.` |
-| Read target is a directory | `Read targets a file, not a directory. Use the Glob tool to list directory contents. Path is a directory: <path>.` |
+| Read target is a directory | ``Read targets a file, not a directory. Use `ls <dir>` or `git ls-files <pathspec>` to list directory contents. Path is a directory: <path>.`` |
 | Edit / MultiEdit both missing | `Create the parent directory first or choose an existing path. Edit target and parent directory are both missing: <path>; parent: <parent>.` |
 | Glob path missing or not a directory | `Choose an existing search directory before retrying. Glob path does not exist as a directory: <path>.` |
 | Grep path missing | `Choose an existing file or directory before retrying. Grep path does not exist: <path>.` |
@@ -799,8 +836,9 @@ errors emit "could not confirm" so the message stays accurate.
   could not find and, for Edit, which parent directory was also missing.
 - If the path was a typo, fix it. If the path belongs to a different
   working directory, set `cwd` correctly or use an absolute path.
-- For Read of a directory, switch to the Glob tool. For Glob with a file
-  argument, switch to Grep or Read.
+- For Read of a directory, use `ls <dir>` or `git ls-files <pathspec>`
+  to list contents. For Glob with a file argument, switch to Read for a
+  single file or `git ls-files <pathspec>` to list candidates.
 - For a brand-new file you intend to create, prefer `Write`; the pre-check
   is exempt for `Write`. `Edit` of a brand-new file is also accepted as long
   as the parent directory already exists.
@@ -855,7 +893,15 @@ interactive UI dialogs, causing blank answers or skipped consent screens.
 ## Best practices
 
 - Always use `source source_me.sh && python3` for Python execution
-- Use dedicated tools (Read, Grep, Glob) instead of their Bash equivalents
+- Use the Read tool for file inspection (offset / limit available)
+- Use `git ls-files <pathspec>` or `ls <dir>` for file discovery
+- `grep` and `rg` are good tools and stay allowed as pipeline filters on
+  already-bounded command output (`git ls-files | grep pat`,
+  `git diff | rg pat`). File-path `grep`/`rg` is denied to push the
+  bounded-input discipline -- scope-control rule, not anti-grep.
+- For broad or structured content searches, write a `_temp.py` helper
+  that starts from a bounded candidate list (e.g. `git ls-files`) and
+  run it with `source source_me.sh && python3 _temp.py`
 - Write scratch code to `_temp.py` or `_temp.sh` (underscore prefix = safe to delete)
 - Keep compound commands under 5 chained sub-commands
 - No command substitution (`` ` `` or `$(...)`) in variable assignments
@@ -865,20 +911,21 @@ interactive UI dialogs, causing blank answers or skipped consent screens.
 
 ## Common patterns
 
-The Grep, Read, Glob, Edit, and Write entries below are Claude Code
-*tool calls*, not shell commands. Invoke them as tools, not via Bash.
-There is no Bash escape hatch for searching repo files -- use the Grep
-tool. For Bash file listings, `git ls-files <pathspec>` and `ls <dir>`
-are allowed; for slicing piped stdout, `... | grep pat`, `... | head -5`,
-and `... | sed -n '10,20p'` are allowed.
+`Read`, `Edit`, and `Write` are first-class Claude Code tool calls. File
+discovery and content search go through `git ls-files`, `ls`, and the
+Read tool in this agent context -- the Claude Code `Grep` and `Glob`
+tool calls are not relied upon (not consistently available). `grep` and
+`rg` remain useful as pipeline filters on already-bounded command output:
+`... | grep pat`, `... | rg pat`, `... | head -5`, and `... | sed -n '10,20p'`
+are all allowed.
 
 | Task | Wrong | Right |
 | --- | --- | --- |
 | Run Python | `python3 script.py` | `source source_me.sh && python3 script.py` |
 | Read a file | `cat /path/to/file.py` | Read tool: `file_path="/path/to/file.py"` |
-| Search files | `grep -r "pattern" src/` | Grep tool: `pattern="pattern"`, `path="src/"` |
-| Tool name as Bash | `Grep -n "^## " docs/CHANGELOG.md` | Invoke the Grep tool directly (not via Bash) |
-| Find files | `find . -name "*.py"` | Glob tool: `pattern="**/*.py"`. For Bash listings, `ls <dir>` or `git ls-files '*.py'` |
+| Search files | `grep -r "pattern" src/` | `git ls-files <pathspec>` to list candidates, then use the Read tool on targeted files; piped `grep`/`rg` on bounded stdout; `_temp.py` (bounded candidates) for broad/structured search |
+| Tool name as Bash | `Grep -n "^## " docs/CHANGELOG.md` | Invoke the actual tool. For search, use `git ls-files` + Read |
+| Find files | `find . -name "*.py"` | `git ls-files '*.py'` or `ls <dir>` |
 | Read lines 10-20 | `sed -n '10,20p' file.txt` | Read tool: `offset=10`, `limit=11` |
 | Delete temp file | `rm temp.py` | Name it `_temp.py`, then `rm _temp.py` |
 | Rename file | `mv old.py new.py` | `git mv old.py new.py` |

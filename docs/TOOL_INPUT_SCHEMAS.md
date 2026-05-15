@@ -350,7 +350,8 @@ The `claude-code-permissions-hook` currently extracts these fields for rule matc
 
 | Tool(s) | Field | Used For |
 |---------|-------|----------|
-| Read, Write, Edit, Glob | `file_path` | Path-based allow/deny rules |
+| Read, Write, Edit, MultiEdit | `file_path` | Path-based allow/deny rules; path-existence pre-check |
+| Glob, Grep | `path` | Path-based allow/deny rules; path-existence pre-check (defensive coverage -- Glob/Grep tool calls are not consistently exposed in every agent context) |
 | Bash | `command` | Command pattern matching |
 | Task | `subagent_type` | Agent type restrictions |
 | Task | `prompt` | Prompt content filtering |

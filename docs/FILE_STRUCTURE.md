@@ -83,7 +83,7 @@ tools/
 |                               the live config + example.toml; lives here
 |                               because it is operational tooling, not a
 |                               pytest file
-`- test_plan_mode_enforcement.py  Operational check for plan-mode tool gating
+`- check_plan_mode_enforcement.py  Operational check for plan-mode tool gating
 ```
 
 ### `docs/`
