@@ -52,11 +52,11 @@ src/
 tests/
 +- integration_test.rs          Rust integration tests using JSON fixtures
 +- test_protected_branch.rs     Rust tests for protected-branch behavior
-+- command_decisions.tsv        Decision-table regression corpus (~1150 rows)
++- command_decisions.tsv        Decision-table regression corpus (~1950 rows)
 +- test_config.toml             Synthetic config used by the Rust integration
 |                               tests + a small subset of TSV rows
 +- test_protected_branch_config.toml  Config for the protected-branch tests
-+- *.json                       HookInput fixtures referenced by integration_test.rs
++- fixtures/*.json              HookInput fixtures referenced by integration_test.rs
 +- conftest.py                  pytest setup (REPO_ROOT discovery)
 +- git_file_utils.py            Shared helper for repo-root resolution
 +- check_ascii_compliance.py    Single-file ASCII linter

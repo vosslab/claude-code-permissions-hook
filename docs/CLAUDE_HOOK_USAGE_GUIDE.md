@@ -57,15 +57,21 @@ available in this agent context, so this guide does not rely on them as
 recovery paths. For file discovery and content search, reach for
 `git ls-files`, `ls`, the Read tool, piped `grep`/`rg`, and `_temp.py`
 helpers. `grep` and `rg` remain allowed as pipeline filters on
-already-bounded output; the deny on file-path `grep`/`rg`/`find` is a
+already-bounded output; the deny on file-path `grep`/`rg` is a
 scope-control rule that pushes agents to bound the search space first.
-The third column lists Bash forms that remain allowed.
+`find` is partially allowed: read-only forms in safe path zones
+(relative, `/tmp`, `~/<workspace>/...`, narrow `~/.claude/agents`,
+`~/.claude/commands`, `~/.claude/skills`) are auto-allowed;
+destructive predicates, bare/system roots, broad `~/.claude` or
+`~/.config` recursion, and command substitution are denied -- see
+the `find` section below. The third column lists Bash forms that
+remain allowed.
 
 | Denied Bash form | Preferred recovery | Allowed Bash forms |
 | --- | --- | --- |
 | `cat /path/to/file`, `head -20 /path`, `tail -20 /path` | Read tool with `file_path`, `offset`, `limit` | `... \| cat`, `... \| head -5`, `... \| tail -5` (pipeline, no file arg) |
 | `grep pat /path`, `/usr/bin/grep ...`, `rg pat dir/`, `egrep`, `fgrep` | `git ls-files <pathspec>` to list candidates, then use the Read tool on targeted files; piped `grep`/`rg` on bounded stdout; `_temp.py` (bounded candidate list) for broad search | `... \| grep pat`, `... \| rg pat` (pipeline, no file arg) for stdout filtering |
-| `find . -name "*.py"` (any path form) | `git ls-files <pathspec>` or `ls <dir>` | `ls <dir>`, `git ls-files <pathspec>` |
+| `find /etc -name '*.conf'`, `find . -delete`, `find /Users` (unsafe shapes) | Use bounded read-only `find` in a safe path zone (`.`, `/tmp`, `~/<workspace>/...`, `/Users/<me>/<workspace>/...`). For repo content, `git ls-files <pathspec>` is still preferred. | `find . -name '*.py'`, `find /tmp -type f`, `find ~/<workspace>/repo -type f` |
 | `sed -n '10,20p' file.txt` | Read tool with `offset=10`, `limit=11` | `... \| sed -n '10,20p'` (pipeline) |
 
 The deny rules cover all binary variants (alternate names, absolute paths like
@@ -445,19 +451,80 @@ rule -- piped `grep`/`rg` on bounded stdout stays allowed.
 
 ### `find`
 
-**Instead:** Use `git ls-files <pathspec>` inside a git repo, or
-`ls <dir>` for a shallow listing. Use `grep` or `rg` only to filter
-already-bounded command output (`git ls-files | grep pat` or
-`git ls-files | rg pat`). For broad/structured searches, write a
-`_temp.py` helper that starts from a bounded candidate list (e.g.
-`git ls-files`) and run it with
-`source source_me.sh && python3 _temp.py`.
+Read-only forms in safe path zones are allowed. Destructive
+predicates, unsafe roots, and command substitution are denied.
 
-**Why:** Scope control. Broad recursive `find` scans produce noisy
-output and invite fragile parsing; agents should bound the candidate
-set first.
+**Instead:** Use bounded read-only `find` in a safe path zone:
 
-**Blocked:** `find . -name "*.py"`, including absolute-path invocations.
+- relative paths: `.`, `docs`, `src/sub`, `tests`
+- `/tmp`, `/tmp/...`, `/private/tmp/...`
+- workspace via tilde: `~/<workspace>/...` (e.g.
+  `~/nsh/<repo>/...`); bare `~` is denied
+- workspace via absolute path:
+  `/Users/<me>/<workspace>/<repo>/...` or
+  `$HOME/<workspace>/...`
+- narrow Claude agent-config subtrees:
+  `~/.claude/agents/...`, `~/.claude/commands/...`,
+  `~/.claude/skills/...` (and absolute / `$HOME` equivalents).
+  Bare `~/.claude` is denied; non-allowlist subpaths like
+  `~/.claude/projects` passthrough.
+
+Common read-only predicates ride along: `-name`, `-iname`,
+`-type f|d|l`, `-path`, `-maxdepth`, `-mindepth`, `-not`, `!`,
+`-o`, `-a`, grouping `(` `)`, `-print`, `-empty`. Output shaping
+pipes (`| head`, `| sort`, `| grep`, `| rg`) stay allowed.
+**Not in this pass:** `-size`, `-print0`, `-printf`, `-prune`,
+`-newer`, `-mtime`, `-atime`, `-user`, `-group`, `-perm`, `-links`,
+`-inum`, `-samefile`, `-fstype`, `-mount`, `-xdev`, `-regex`,
+`-iregex` (add a focused rule + fixtures if needed).
+
+Inside a git repo, prefer `git ls-files <pathspec>` when
+tracked-file discovery is enough -- it excludes ignored and
+build artifacts. Use `find` for `/tmp`, generated trees, untracked
+files, and mixed/non-git subtrees.
+
+**Why:** Read-only discovery in safe path zones is bounded by the
+path zone, not by `-maxdepth`. Destructive predicates and destructive
+`xargs` pipelines stay denied so mutation is a separate, reviewed
+step.
+
+**Blocked:**
+
+- Bare `find` with no args -- it is an unbounded recursive listing.
+- Destructive / output-file predicates (hard deny): `-delete`,
+  `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprintf`,
+  `-fls`.
+- Advanced filters not yet supported in this pass (conservative
+  deny -- ask for a focused rule + fixtures if needed): `-printf`,
+  `-print0`, `-prune`, `-newer`, `-mtime`, `-atime`, `-user`,
+  `-group`, `-perm`, `-size`, `-links`, `-inum`, `-samefile`,
+  `-fstype`, `-mount`, `-xdev`, `-regex`, `-iregex`.
+- Destructive xargs pipelines: `find ... | xargs rm`,
+  `find ... | xargs -0 rm`, `xargs chmod`, `xargs chown`,
+  `xargs mv`, `xargs sudo`.
+- Bare `/`, system roots (`/etc`, `/usr`, `/opt`, `/System`,
+  `/Library`, `/var`, `/bin`, `/sbin`, `/root`, `/sys`, `/proc`,
+  `/dev`, `/boot`).
+- Bare `/Users`, `/home`, or `/Users/<user>` without a workspace
+  subpath. Use `~/<workspace>/...` or
+  `/Users/<me>/<workspace>/...` instead.
+- Broad user-config / cache trees: bare `~/.claude`, `~/.config`,
+  `/var/folders`. The narrow Claude allowlist
+  (`~/.claude/agents`, `~/.claude/commands`, `~/.claude/skills`)
+  is allowed.
+- Command substitution: `find . -name "$(...)"`,
+  `VAR=$(find ...)`.
+- Path traversal: `find ../`, `find docs/../`.
+
+Residual passthrough: a non-standard home subdir like
+`/Users/<me>/scratch_random_dir/...` is neither in the explicit
+non-workspace denylist (`Downloads`, `Documents`, `Desktop`,
+`Library`, `Movies`, `Music`, `Pictures`, `Public`, `Applications`)
+nor in the safe-zone allow. It falls through to user approval.
+
+Quoted path roots (`find "docs" -name '*.md'`, `find './src' -type f`)
+are out of scope in this pass and passthrough. Drop the quotes
+to auto-allow.
 
 ### `awk`
 
@@ -895,6 +962,13 @@ interactive UI dialogs, causing blank answers or skipped consent screens.
 - Always use `source source_me.sh && python3` for Python execution
 - Use the Read tool for file inspection (offset / limit available)
 - Use `git ls-files <pathspec>` or `ls <dir>` for file discovery
+- Use bounded read-only `find` in safe path zones (`.`, `/tmp`,
+  `~/<workspace>/...`, `~/.claude/agents|commands|skills`) for
+  discovery outside tracked repo files.
+  Destructive `find` actions (`-delete`, `-exec`, `-execdir`,
+  `-ok`, `-okdir`, `-fprint`, `-fprintf`, `-fls`) and destructive
+  `xargs` pipelines (`xargs rm`, `xargs chmod`, `xargs chown`,
+  `xargs mv`, `xargs sudo`) stay denied.
 - `grep` and `rg` are good tools and stay allowed as pipeline filters on
   already-bounded command output (`git ls-files | grep pat`,
   `git diff | rg pat`). File-path `grep`/`rg` is denied to push the
@@ -925,7 +999,7 @@ are all allowed.
 | Read a file | `cat /path/to/file.py` | Read tool: `file_path="/path/to/file.py"` |
 | Search files | `grep -r "pattern" src/` | `git ls-files <pathspec>` to list candidates, then use the Read tool on targeted files; piped `grep`/`rg` on bounded stdout; `_temp.py` (bounded candidates) for broad/structured search |
 | Tool name as Bash | `Grep -n "^## " docs/CHANGELOG.md` | Invoke the actual tool. For search, use `git ls-files` + Read |
-| Find files | `find . -name "*.py"` | `git ls-files '*.py'` or `ls <dir>` |
+| Find files | `find / -name "*.py"` (system root); `find . -delete` (destructive) | Bounded read-only: `find <safe-root> -type f -name PAT` (relative paths, `/tmp`, `~/<workspace>/...`); or `git ls-files <pathspec>` for tracked-only repo content |
 | Read lines 10-20 | `sed -n '10,20p' file.txt` | Read tool: `offset=10`, `limit=11` |
 | Delete temp file | `rm temp.py` | Name it `_temp.py`, then `rm _temp.py` |
 | Rename file | `mv old.py new.py` | `git mv old.py new.py` |

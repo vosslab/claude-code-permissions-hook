@@ -99,7 +99,7 @@ deny	head -20 /abs/path/file.txt
 deny	tail -5 /tmp/x.log
 deny	grep pattern /tmp/x.txt
 deny	rg pattern /abs/search/dir
-deny	find . -name "*.py"
+allow	find . -name "*.py"
 deny	sed -n '10,20p' /tmp/file.txt
 allow	git diff HEAD -- ef_tools/docx_builder.py | sed -n '250,400p'
 
@@ -272,8 +272,8 @@ deny	rg foo /tmp/x.log
 deny	egrep foo /tmp/x.log
 deny	fgrep foo /tmp/x.log
 deny	egrep -n pat /Users/vosslab/x.py
-deny	find /tmp -name *.py
-deny	/usr/bin/find . -name *.py
+allow	find /tmp -name *.py
+allow	/usr/bin/find . -name *.py
 deny	sed -n 1,5p /tmp/x.txt
 
 # --- Bash-side escape hatches named in the redirect-style deny reasons ---
@@ -1186,3 +1186,177 @@ passthrough	/usr/bin/make
 passthrough	/usr/bin/make /tmp/x
 passthrough	/usr/bin/pyflakes
 passthrough	/usr/bin/pyflakes /tmp/x
+
+# ===================================================================
+# find rules: read-only safe-zone allow + destructive/unsafe-root denies
+# Safe zones: relative paths, /tmp, /private/tmp, tilde+workspace,
+# absolute /Users/<user>/<workspace>/...  No -maxdepth requirement.
+# Denies: destructive/output-file predicates (D1a), advanced
+# filters (D1b), bare/system roots + bare ~ (D2a), non-workspace
+# home subdirs (D2b), destructive xargs pipelines (D3), bare find
+# (D4), path traversal + command substitution (D5).
+# ===================================================================
+
+# --- find: allowed read-only forms in safe path zones ---
+allow	find . -name '*.py'
+allow	find . -type f
+allow	find . -type f -name '*.py'
+allow	find docs -name 'SCENE_*.md' -o -name 'PROTOCOL_*.md'
+allow	find src -type f
+allow	find src -type f -name '*.ts'
+allow	find tests/playwright -type f
+allow	find tools -name '*.py' -type f
+allow	find /tmp -name '*.py'
+allow	find /tmp -type f -name '*.json'
+allow	find /private/tmp -type f -name '*.json'
+# Workspace-specific rows: live config uses WORKSPACE_ROOT=nsh,
+# example.toml uses WORKSPACE_ROOT=projects. Split per config.
+allow	Bash	claude-code-permissions-hook.toml	{"command": "find ~/nsh/repo -type f -name '*.rs'"}
+allow	Bash	example.toml	{"command": "find ~/projects/repo -type f -name '*.rs'"}
+allow	Bash	claude-code-permissions-hook.toml	{"command": "find $HOME/nsh/repo -type f -name '*.rs'"}
+allow	Bash	example.toml	{"command": "find $HOME/projects/repo -type f -name '*.rs'"}
+allow	find /tmp
+# Narrow Claude agent-config allowlist (~/.claude/agents|commands|skills)
+# Three prefix forms x three subdir = nine cells; cover each at least once.
+allow	find ~/.claude/agents -name '*.md'
+allow	find ~/.claude/commands -type f
+allow	find ~/.claude/skills -name 'SKILL.md'
+allow	find /Users/vosslab/.claude/agents -type f
+allow	find /Users/vosslab/.claude/commands -name '*.md'
+allow	find /Users/vosslab/.claude/skills/superpowers -type f
+allow	find $HOME/.claude/agents -name '*.md'
+allow	find $HOME/.claude/commands -type f
+allow	find $HOME/.claude/skills -name 'SKILL.md'
+allow	Bash	claude-code-permissions-hook.toml	{"command": "find /Users/vosslab/nsh/repo -type f -name '*.rs'"}
+allow	Bash	example.toml	{"command": "find /Users/vosslab/projects/repo -type f -name '*.rs'"}
+allow	Bash	claude-code-permissions-hook.toml	{"command": "find /Users/vosslab/nsh/repo/src -name '*.ts'"}
+allow	Bash	example.toml	{"command": "find /Users/vosslab/projects/repo/src -name '*.ts'"}
+allow	find . -maxdepth 2 -type f -name '*.py'
+allow	find docs -maxdepth 1 -name 'SCENE_*.md'
+allow	find . -type f \( -name '*.py' -o -name '*.rs' \)
+allow	find . -not -name '_*' -type f
+allow	find . -type f -name '*.py' | head -20
+allow	find . -type f -name '*.py' | sort
+allow	find . -type f -name '*.py' | grep test_
+allow	find . -type f -name '*.py' | rg test_
+allow	find . -name '*.tmp' | xargs wc -l
+allow	find . -name '*.tmp' | xargs cat
+
+# --- find: D4 bare find (no args) ---
+deny	find
+
+# --- find: D2a bare /, system roots, bare home roots ---
+deny	find /
+deny	find / -name '*.py'
+deny	find /etc -name passwd
+deny	find /usr -name python
+deny	find /opt -name node
+deny	find /System -name '*.plist'
+deny	find /Library -name '*.plist'
+deny	find /var -name '*.log'
+deny	find /Users
+deny	find /Users/
+deny	find /Users/vosslab
+deny	find /Users/vosslab/
+deny	find /home
+deny	find /home/other -name '*.py'
+deny	find ~ -name '*.py'
+
+# --- find: D2b non-workspace home subdirs (absolute + tilde) ---
+deny	find /Users/vosslab/Downloads -type f
+deny	find /Users/vosslab/Documents
+deny	find /Users/vosslab/Library
+deny	find /Users/vosslab/Desktop
+deny	find ~/Downloads -name '*.py'
+deny	find ~/Library -name '*.plist'
+
+# --- find: D2c broad user-config / cache trees ---
+# Bare ~/.claude, ~/.config, /var/folders denied; narrow Claude
+# subtrees (~/.claude/agents|commands|skills) allowed by A1.
+deny	find ~/.claude -name '*.json'
+deny	find ~/.claude/
+deny	find ~/.config -name '*.toml'
+deny	find ~/.config/
+deny	find /Users/vosslab/.claude -name '*.json'
+deny	find /Users/vosslab/.claude/
+deny	find /Users/vosslab/.config -type f
+deny	find /Users/vosslab/.config/
+deny	find /var/folders -name '*.tmp'
+deny	find /var/folders/
+# Documented residual: non-allowlist subpath under ~/.claude
+# falls through to passthrough (neither A1 nor D2c match).
+passthrough	find ~/.claude/projects -type f
+
+# --- find: D2a flag-before-path unsafe-root forms ---
+deny	find -L /etc -name passwd
+deny	find -H /Users -name '*.py'
+
+# --- find: D1a hard-deny destructive / output-file predicates ---
+deny	find . -delete
+deny	find . -name '*.py' -delete
+deny	find . -exec grep foo {} \;
+deny	find . -name '*.py' -execdir grep foo {} +
+deny	find . -ok rm {} \;
+deny	find . -okdir rm {} \;
+deny	find . -fprint /tmp/list.txt
+deny	find . -fprintf /tmp/x '%p\n'
+deny	find . -fls /tmp/list.txt
+
+# --- find: D1b conservative deny (advanced filters) ---
+deny	find . -printf '%p\n'
+deny	find . -newer Makefile
+deny	find . -prune
+deny	find . -mtime -1
+deny	find . -atime +7
+deny	find . -user vosslab
+deny	find . -group staff
+deny	find . -perm 0644
+deny	find . -size +10M
+deny	find . -links 2
+deny	find . -regex '.*\.py$'
+deny	find . -iregex '.*\.PY$'
+deny	find . -xdev -type f
+deny	find . -mount -type f
+deny	find . -inum 12345
+deny	find . -samefile Makefile
+deny	find . -fstype apfs
+deny	find . -name '*.tmp' -print0
+
+# --- find: command substitution in path or predicates ---
+deny	find . -name "$(echo '*.py')"
+deny	FILES=$(find . -name '*.py')
+
+# --- find: D3 destructive xargs pipelines ---
+deny	find . -name '*.py' | xargs rm
+deny	find . -name '*.tmp' | xargs -I{} rm {}
+deny	find . -name '*.tmp' | xargs -I {} rm {}
+deny	find . -name '*.tmp' | xargs -0 -I{} rm {}
+deny	find . -name '*.tmp' | xargs chmod 0644
+deny	find . -name '*.tmp' | xargs chown root
+deny	find . -name '*.tmp' | xargs mv /dst/
+deny	find . -name '*.tmp' | xargs sudo rm
+
+# --- find: path-traversal forms ---
+deny	find ../ -name '*.py'
+deny	find docs/../ -name '*.py'
+deny	find ./../ -name '*.py'
+
+# --- find: D1a flag-before-path destructive forms ---
+deny	find -delete .
+deny	find -exec echo {} \; .
+deny	find -L /etc -delete
+
+# --- find: quoted path roots (out of scope first pass; passthrough) ---
+passthrough	find "docs" -name '*.md'
+passthrough	find './src' -type f
+
+# --- find: absolute-path invocations coverage ---
+allow	/usr/bin/find . -name '*.py'
+allow	/opt/homebrew/bin/find . -name '*.py'
+deny	/usr/bin/find /etc -name passwd
+deny	/usr/bin/find . -delete
+allow	command find . -name '*.py'
+deny	command find /etc
+
+# --- find: residual gap documented in plan ---
+passthrough	find /Users/vosslab/scratch_random_dir

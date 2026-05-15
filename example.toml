@@ -84,6 +84,42 @@ PROJECT_PATH = "^$HOME/projects(/|$)"
 # Write access: Claude internal config
 CLAUDE_PATH = "^$HOME/\\.claude/"
 
+# --- find safe-zone configuration ---
+# Workspace folder name under $HOME. Customize per user.
+# example.toml uses "projects" as a placeholder; live configs
+# replace it with the user's workspace folder (e.g. "nsh").
+# IMPORTANT: WORKSPACE_ROOT only parameterizes the `find` safe
+# zone. The file-tool path variables HOME_PATH and PROJECT_PATH
+# above hard-code their workspace folder independently; update
+# all three together when customizing per user.
+WORKSPACE_ROOT = "projects"
+
+# Safe positional path argument for `find`. Branches (in regex order):
+#   1. "." or "./..." cwd-rooted relative paths
+#   2. "~/${WORKSPACE_ROOT}/..." workspace via tilde (bare ~ and
+#      ~/Downloads style paths are NOT allowed)
+#   3. /tmp, /tmp/..., and /private/tmp/... scratch paths
+#   4. /Users/<user>/${WORKSPACE_ROOT}/... workspace absolute paths
+#   5. $HOME/${WORKSPACE_ROOT}/... workspace via $HOME -- spelled
+#      [$]HOME so the config's env-var expander (src/config.rs
+#      expand_env_vars) does not substitute $HOME at load time
+#   6. Claude agent-config subtrees (narrow allowlist):
+#      (~|/Users/<user>|[$]HOME)/.claude/(agents|commands|skills)/...
+#      The [$]HOME spelling matches branch 5: the env-var expander
+#      treats bare $HOME as a substitution target, so the char-class
+#      form is required. Broad ~/.claude is denied by D2c.
+#   7. bare relative paths (letters/digits/dots/dashes; first char
+#      a letter or underscore; no leading /, ~, $, .., or *)
+# Does NOT match:
+#   - bare ~ (would scan entire home)
+#   - bare /, system roots, bare /Users, bare /home, bare /Users/<user>
+#   - non-workspace /Users/<user>/<subdir>/... paths
+#   - bare ~/.claude, ~/.config, /var/folders (denied by D2c)
+#   - any path containing shell glob chars (*, ?, [) in any segment
+# Note: `..` path traversal is excluded by D5 deny and by A1's
+# command_exclude_regex (${NO_TRAVERSAL}), not by this pattern.
+FIND_SAFE_PATH_ARG = "(?:\\.(?:/[A-Za-z0-9_./-]+)?|~/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|/(?:private/)?tmp(?:/[A-Za-z0-9_./-]+)?|/Users/[^/\\s]+/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|[$]HOME/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills)(?:/[A-Za-z0-9_./-]+)?|[A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_./-]+)?)"
+
 # ===================================================================
 # DENY rules (checked first, before allow rules)
 # Every deny rule MUST have a reason field to steer Claude to a better path.
@@ -383,13 +419,108 @@ reason = "Run the command directly -- the Bash tool already runs bash. `bash -c`
 
 # --- Tool steering (use dedicated Claude tools instead) ---
 
-# Deny find - steer to git ls-files / ls / _temp.py (scope control, not anti-find).
-# Covers absolute-path invocations (/usr/bin/find, /opt/homebrew/.../find) and
-# command/env prefixes.
+# --- find: bounded read-only allow in safe path zones ---
+# Split policy: D1a hard-deny destructive/output-file predicates,
+# D1b conservative-deny advanced predicates, D2a bare/system roots
+# + bare `~`, D2b non-workspace home subdirs (absolute + tilde),
+# D3 destructive xargs pipelines, D4 bare `find`, D5 path traversal
+# + command substitution; A1 allow read-only `find` in safe path
+# zones. All find rules anchor at ^${TOOL_PREFIX}${TOOL_PATH}find\b
+# so absolute-path invocations (/usr/bin/find, /opt/homebrew/bin/find)
+# and `command find` prefixes route through the same rules. See
+# docs/CHANGELOG.md 2026-05-17 and the "Why find got a safe-zone
+# allow" note in docs/CONFIGURATION_GUIDE.md.
+
+# D1a -- hard deny of destructive / output-file find predicates.
+# Fires regardless of path or other flags.
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\b"
-reason = "Use `git ls-files <pathspec>` inside a git repo, or `ls <dir>` for a shallow listing. Use `grep` or `rg` only to filter already-bounded command output (`git ls-files | grep pat` or `git ls-files | rg pat`). For broad/structured searches write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `find` is denied because broad recursive scans produce noisy output and invite fragile parsing -- scope-control rule, not anti-find."
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\b.*\\s-(delete|exec|execdir|ok|okdir|fprint|fprintf|fls)\\b"
+reason = "Use `find` only for read-only discovery. `find` with `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprintf`, or `-fls` is denied. First list candidates with `find <safe-root> ...`, review them, then run any mutation as a separate explicit command."
+
+# D1b -- conservative first-pass deny of advanced find predicates.
+# These predicates are not absolutely unsafe; they expand the
+# policy surface and require fixtures before relaxation. Add a
+# focused allow with fixtures if logs show legitimate demand.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\b.*\\s-(printf|print0|prune|newer|mtime|atime|user|group|perm|size|links|inum|samefile|fstype|mount|xdev|regex|iregex)\\b"
+reason = "Use simple read-only `find` predicates such as `-name`, `-iname`, `-type`, `-path`, `-not`, `-o`, `-a`, `-maxdepth`, `-mindepth`, or `-print`. Advanced predicates (`-printf`, `-print0`, `-prune`, `-newer`, `-mtime`, `-atime`, `-user`, `-group`, `-perm`, `-size`, `-links`, `-inum`, `-samefile`, `-fstype`, `-mount`, `-xdev`, `-regex`, `-iregex`) are not allowed in the first pass; add a focused rule with fixtures if one is needed."
+
+# D2a -- bare `/`, system roots, bare home roots, bare `~`.
+# Flag-before-path forms (`find -L /etc ...`) are consumed by the
+# leading flag prefix.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\s+(-[A-Za-z]+(\\s+\\S+)?\\s+)*(/(?:\\s|$)|/(etc|usr|opt|System|Library|var|bin|sbin|root|sys|proc|dev|boot)\\b|/(Users|home)(/[^/\\s]+)?/?(\\s|$)|~(\\s|$))"
+reason = "Use a relative path, `/tmp`, `/private/tmp`, or a workspace path under `~/<workspace>/...`. `find` against bare `/`, system roots (`/etc`, `/usr`, `/opt`, `/System`, `/Library`, `/var`, `/bin`, `/sbin`, `/root`, `/sys`, `/proc`, `/dev`, `/boot`), bare home roots (`/Users`, `/Users/`, `/home`, `/home/`, `/Users/<user>`, `/Users/<user>/` without a further subpath), or bare `~` (which would scan the whole home directory) is denied to prevent broad cross-user or system scans."
+
+# D2b -- standard non-workspace home subdirs (absolute /Users/<user>/<subdir>
+# and tilde ~/<subdir>). Rust regex has no lookaround, so this enumerates
+# the standard macOS home subdirs explicitly. Non-standard non-workspace
+# subdirs (e.g. /Users/<me>/scratch_random_dir) fall through to passthrough.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\s+(-[A-Za-z]+(\\s+\\S+)?\\s+)*(/Users/[^/\\s]+|~)/(Downloads|Documents|Desktop|Library|Movies|Music|Pictures|Public|Applications)\\b"
+reason = "Use a workspace path under `~/<workspace>/...` for read-only `find`. Scans of standard non-workspace home subdirs (Downloads, Documents, Desktop, Library, Movies, Music, Pictures, Public, Applications) -- whether spelled `/Users/<user>/<subdir>` or `~/<subdir>` -- are denied."
+
+# D2c -- broad user-config / cache trees. Matches the bare or
+# trailing-slash form of `~/.claude`, `~/.config`, the absolute
+# `/Users/<user>/.claude`, `/Users/<user>/.config` variants, and
+# `/var/folders` (system cache). The trailing `(\s|$)` anchor
+# means this deny only fires when no further subpath follows, so
+# `find ~/.claude/agents ...` does NOT hit D2c (the `/agents`
+# token would have to be `\s` or EOS, which it is not).
+# A1's narrow allowlist handles `~/.claude/(agents|commands|skills)`.
+# Non-allowlist subdirs like `~/.claude/projects` are neither
+# matched by A1 nor by D2c -- they passthrough.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\s+(-[A-Za-z]+(\\s+\\S+)?\\s+)*((~|/Users/[^/\\s]+)/\\.(claude|config)|/var/folders)/?(\\s|$)"
+reason = "Use a workspace path under `~/<workspace>/...` or a narrow Claude subtree (`~/.claude/agents`, `~/.claude/commands`, `~/.claude/skills`). Broad scans of `~/.claude`, `~/.config`, or `/var/folders` are denied because those trees contain config, cache, and credentials that should not be recursed."
+
+# D3 -- destructive xargs pipelines. Broader than the find-allow strictly
+# requires; destructive xargs is independently risky. Matches any leaf
+# where `xargs` is followed (with any flags) by `rm`, `chmod`, `chown`,
+# `mv`, or `sudo`. The `[^|;&]*` between xargs and the verb accepts
+# arbitrary flag shapes (-I{}, -I {}, -0 -I{}, etc.).
+[[deny]]
+tool = "Bash"
+command_regex = "\\bxargs\\b[^|;&]*\\b(rm|chmod|chown|mv|sudo)\\b"
+reason = "Destructive `xargs` pipelines (`xargs rm`, `xargs -0 rm`, `xargs -I{} rm`, `xargs chmod`, `xargs chown`, `xargs mv`, `xargs sudo`) are denied. List candidates with `find <safe-root> ...` or `git ls-files <pathspec>`, review, then run the mutation as a separate explicit command on the chosen paths."
+
+# D4 -- bare `find` (no args). Auto-deny rather than passthrough: an
+# unbounded recursive listing at cwd is almost never what the agent wants.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\s*$"
+reason = "Use `find <safe-root> -name <pattern>` or `find <safe-root> -type f` for read-only discovery. Bare `find` is denied because it performs an unbounded recursive listing with no filter."
+
+# D5 -- find with path traversal or command substitution.
+# A1's command_exclude_regex drops these from the allow but no
+# other deny catches them, so without this rule they would fall
+# through to passthrough. Explicit deny + steering reason is faster
+# than the user-approval dialog.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\b.*(\\.\\.(/|\\s|$)|${NO_CMD_SUB})"
+reason = "Use a path inside the working tree without `..` traversal and avoid `$(...)` or backticks. `find` with path traversal (`..`) or command substitution is denied because it escapes the intended search scope or hides shell evaluation."
+
+# A1 -- allow read-only `find` in safe path zones. Path arg must match
+# ${FIND_SAFE_PATH_ARG}; the exclude regex mirrors D1a+D1b predicates
+# plus D5 traversal/cmd-sub exclusions so unsupported predicates fail
+# the allow *and* match a deny (clearer than passthrough). The
+# ${NO_TRAVERSAL} and ${NO_CMD_SUB} entries here are intentional
+# belt-and-suspenders overlap with D5: D5 fires first (deny precedence)
+# and provides the steering message, this exclude prevents A1 from
+# inadvertently allowing a traversal/cmd-sub leaf if D5's regex ever
+# misses an edge case. The trailing path terminator is `(?:\\s|$)`
+# (not `\\b`) because the safe path arg can end in `.`, `/`, or `-`,
+# all of which are non-word chars where `\\b` would fail.
+[[allow]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\s+(-[A-Za-z]+(\\s+\\S+)?\\s+)*${FIND_SAFE_PATH_ARG}(?:\\s|$)"
+command_exclude_regex = "\\s-(delete|exec|execdir|ok|okdir|fprintf|fprint|fls|printf|print0|prune|newer|mtime|atime|user|group|perm|size|links|inum|samefile|fstype|mount|xdev|regex|iregex)\\b|${NO_CMD_SUB}|${NO_TRAVERSAL}"
 
 # Deny `git grep`. Pattern: agents who hit the grep deny look for a Bash
 # escape hatch and reach for `git grep`, which would keep every search

@@ -401,7 +401,59 @@ The maintainer rationale and evidence live here. The vendored
 agent-facing instructions -- short notes on what to do, not the
 underlying live-test/log-scan evidence that motivated this policy.
 
+### Why `find` got a safe-zone allow
+
+A bucket scan across three audit logs (laptop primary + rotated
+`.1.json`, Mac Studio) totalled 385 historical `find` leaves; ~99%
+were denied by the prior broad rule. Dominant legitimate shapes:
+`find <reldir> -name <pat>` (~175), `find /tmp -name <pat>` (~84),
+`find . -type f` / `find <reldir> -type f` (~56),
+`find /Users/<me>/<workspace>/<repo>/...` (~50), and a small
+number of bounded `-maxdepth N` shapes. Destructive `-exec` cases
+were rare (~2). Bare `/` or absolute system-root scans were zero.
+
+Two earlier policies were considered and rejected:
+
+- **Continue denying all `find`.** Mismatched the Claude `Glob`
+  tool unavailability and forced awkward substitutes.
+- **Require `-maxdepth` on every allowed `find`.** Would have
+  rewritten ~370 of 385 historical leaves for boundedness that
+  the path zone already provides.
+
+The adopted split (D1a destructive-predicate deny, D1b
+conservative-advanced-predicate deny, D2a bare/system roots, D2b
+non-workspace home subdirs, D2c broad user-config/cache trees,
+D3 destructive `xargs` pipelines, D4 bare `find`, D5 path
+traversal + command substitution, A1 safe-zone allow) is easier
+to audit than a single carve-out regex. Each deny has a focused,
+testable shape, and the allow has a positive path-zone gate. Rust regex has no
+lookaround, so encoding "everything except the unsafe set" in a
+single regex is not possible; splitting into orthogonal denies
+plus a positive allow gives the same coverage with rules a
+reviewer can audit line by line.
+
+D3 (destructive `xargs`) is broader than the `find`-allow strictly
+requires: it denies destructive `xargs <verb>` regardless of the
+upstream producer (`find`, `git ls-files`, `cat list.txt`, etc.).
+This is intentional -- destructive `xargs` is independently risky.
+Documented in `docs/CHANGELOG.md` so the scope expansion is
+visible.
+
+Residual gap: a non-standard `/Users/<me>/<subdir>/...` absolute
+path outside the workspace (e.g. `/Users/<me>/scratch_random_dir`)
+is not in the explicit D2b list (`Downloads`, `Documents`,
+`Desktop`, `Library`, `Movies`, `Music`, `Pictures`, `Public`,
+`Applications`) and does not match A1's safe-zone allow. It
+passthroughs to user approval. Acceptable: passthrough is a
+user dialog, not a stall. Revisit if logs show recurring
+non-standard subdirs.
+
+Quoted path roots (`find "docs"`, `find './src'`) are also
+out-of-scope first pass and passthrough -- the safe-path regex
+doesn't strip surrounding quotes. Agents drop the quotes or get
+prompted.
+
 ## See Also
 
-- [TOOL_INPUT_SCHEMAS.md](./TOOL_INPUT_SCHEMAS.md) - complete reference for all Claude Code tool inputs
+- [TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md) - complete reference for all Claude Code tool inputs
 - [example.toml](../example.toml) - Working example configuration
