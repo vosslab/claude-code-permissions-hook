@@ -356,104 +356,105 @@ are also allowed.
 
 ### `rm` (file deletion)
 
-**Blocked:** `rm file.txt`, `rm -rf dir/`
-
-**Why:** Prevents accidental deletion of important files.
-
 **Instead:** Use underscore-prefixed filenames for scratch files (`_temp.py`),
 write to `/tmp/`, or use `git rm` for tracked files.
 
+**Why:** Prevents accidental deletion of important files.
+
+**Blocked:** `rm file.txt`, `rm -rf dir/`.
+
 ### `git commit`, `git stash`, `git clean` (branch-aware)
 
-**Blocked on protected branches:** `git commit`, `git commit --amend` (all variations
-including flag insertion like `git -C /tmp commit`). `git stash` and `git clean` are
-denied everywhere.
+**Instead:** Work on an `agent/<task>` branch where commits are allowed. To
+prepare a merge into a protected branch, use `git merge --no-commit --no-ff
+agent/<task>` and let the human review and commit. See
+[Worktrees and protected branches](#worktrees-and-protected-branches) for the
+full workflow.
 
-**Why:** On protected branches (typically `main`, `master`), commits are made by the
-human after reviewing the staged merge via `git diff`. On agent branches, you have
-full commit access. `git stash` and `git clean` are destructive and remove tracked
-or untracked work.
+**Why:** On protected branches (typically `main`, `master`), commits are made by
+the human after reviewing the staged merge via `git diff`. On agent branches,
+you have full commit access. `git stash` and `git clean` are destructive and
+remove tracked or untracked work.
 
-**Instead:** Work on an `agent/<task>` branch where commits are allowed. To prepare
-a merge into a protected branch, use `git merge --no-commit --no-ff agent/<task>`
-and let the human review and commit. See
-[Worktrees and protected branches](#worktrees-and-protected-branches) for the full
-workflow.
+**Blocked on protected branches:** `git commit`, `git commit --amend` (all
+variations including flag insertion like `git -C /tmp commit`). `git stash` and
+`git clean` are denied everywhere.
 
 ### `cat`/`head`/`tail` with file paths
-
-**Blocked:** `cat /path/to/file`, `head -20 /abs/path/file.txt`
-
-**Why:** Read is a Claude Code tool call (like Edit/Write). It provides line
-numbers, offset, and limit, and is the canonical way to inspect a file from
-this harness.
 
 **Instead:** Invoke the Read tool directly with `file_path` and optional
 `offset` and `limit`. The pipeline form (`... | head -5`, `... | tail -5`,
 `... | cat`) stays allowed for slicing piped stdout, where Read does not
 apply.
 
+**Why:** Read is a Claude Code tool call (like Edit/Write). It provides line
+numbers, offset, and limit, and is the canonical way to inspect a file from
+this harness.
+
+**Blocked:** `cat /path/to/file`, `head -20 /abs/path/file.txt`.
+
 ### `grep`/`rg` with file paths
-
-**Blocked:** `grep pattern /path/to/file`, `rg pattern /abs/search/dir`,
-`/usr/bin/grep ...`, `/opt/homebrew/.../grep ...`, `egrep`, `fgrep`. The
-deny covers all binary names and absolute paths.
-
-**Why:** Grep is a Claude Code tool call (like Read/Edit/Write). It supplies
-structured output modes, glob filters, and context lines, and is the
-canonical way to search files from this harness.
 
 **Instead:** Invoke the Grep tool directly with `pattern`, `path`, `glob`,
 `-A`/`-B`/`-C`, `output_mode`, and `head_limit`. The pipeline form
 (`... | grep pat`) stays allowed for slicing piped stdout, where Grep does
 not apply.
 
+**Why:** Grep is a Claude Code tool call (like Read/Edit/Write). It supplies
+structured output modes, glob filters, and context lines, and is the
+canonical way to search files from this harness.
+
+**Blocked:** `grep pattern /path/to/file`, `rg pattern /abs/search/dir`,
+`/usr/bin/grep ...`, `/opt/homebrew/.../grep ...`, `egrep`, `fgrep`. The
+deny covers all binary names and absolute paths.
+
 ### `git grep`
-
-**Blocked:** `git grep <pattern>`, including all git invocation forms
-(`/usr/bin/git grep`, `command git grep`, `env X=y git grep`,
-`git -c core.pager=cat grep`, `git -C <path> grep`,
-`git --git-dir=<dir> grep`, `git --work-tree=<dir> grep`).
-
-**Why:** Grep is a Claude Code tool call (like Read/Edit/Write); `git grep`
-would keep every search shell-side and re-create the loop the file-`grep`
-deny is meant to break. The Grep tool is the canonical search path.
 
 **Instead:** Invoke the Grep tool directly with `pattern`, `path`, `glob`,
 `-A`/`-B`/`-C`, `output_mode`, and `head_limit`. There is no Bash escape
 hatch for repo searches. For Bash file listings, `ls <dir>` and
 `git ls-files <pathspec>` remain allowed.
 
+**Why:** Grep is a Claude Code tool call (like Read/Edit/Write); `git grep`
+would keep every search shell-side and re-create the loop the file-`grep`
+deny is meant to break. The Grep tool is the canonical search path.
+
+**Blocked:** `git grep <pattern>`, including all git invocation forms
+(`/usr/bin/git grep`, `command git grep`, `env X=y git grep`,
+`git -c core.pager=cat grep`, `git -C <path> grep`,
+`git --git-dir=<dir> grep`, `git --work-tree=<dir> grep`).
+
 ### `find`
-
-**Blocked:** `find . -name "*.py"`, including absolute-path invocations.
-
-**Why:** Glob is a Claude Code tool call (like Read/Edit/Write) and supports
-recursive patterns directly.
 
 **Instead:** Invoke the Glob tool directly with `pattern='**/*.py'` and `path`.
 For a shell-side file listing, `ls <dir>` and `git ls-files <pathspec>` are
 both allowed.
 
+**Why:** Glob is a Claude Code tool call (like Read/Edit/Write) and supports
+recursive patterns directly.
+
+**Blocked:** `find . -name "*.py"`, including absolute-path invocations.
+
 ### `awk`
+
+**Instead:** For line-matching, invoke the Grep tool with `pattern`, `path`,
+`glob`, `output_mode`, and `head_limit`. For genuine field extraction, pipe
+the source through `cut`, or read the file with the Read tool and process it
+in a `_temp.py` script.
+
+**Why:** Almost all agent `awk` usage is line-matching ("find lines matching X,
+print them"), which the Grep tool does directly. `awk`'s `/regex/` syntax also
+makes a reliable file-vs-stdin guard impractical, so the deny is unconditional.
 
 **Blocked:** All `awk` invocations -- `awk '/pat/{print}' file`, `awk '{print $2}'`,
 `gawk`, `mawk`, absolute-path and `command`/`env`-prefixed forms, and pipeline
 leaves (`... | awk ...`). Unlike `cat`/`grep`/`sed`, there is no pipe exception:
 `awk` is denied even as a stdin filter.
 
-**Why:** Almost all agent `awk` usage is line-matching ("find lines matching X,
-print them"), which the Grep tool does directly. `awk`'s `/regex/` syntax also
-makes a reliable file-vs-stdin guard impractical, so the deny is unconditional.
-
-**Instead:** For line-matching, invoke the Grep tool with `pattern`, `path`,
-`glob`, `output_mode`, and `head_limit`. For genuine field extraction, pipe the
-source through `cut`, or read the file with the Read tool and process it in a
-`_temp.py` script.
-
 ### `sed -n` with file paths
 
-**Blocked:** `sed -n '10,20p' file.txt`
+**Instead (file case):** Use `Read(file_path='file.txt', offset=10, limit=11)`.
+Other sed operations (substitution, etc.) are allowed.
 
 **Allowed (pipe usage):** `git diff HEAD -- file.py | sed -n '250,400p'`
 -- paginating subprocess stdout is fine; Read can't substitute for it.
@@ -461,10 +462,17 @@ source through `cut`, or read the file with the Read tool and process it in a
 **Why:** The Read tool with offset and limit does file reads better, but sed
 is the right tool for slicing piped stdout.
 
-**Instead (file case):** Use `Read(file_path='file.txt', offset=10, limit=11)`.
-Other sed operations (substitution, etc.) are allowed.
+**Blocked:** `sed -n '10,20p' file.txt`.
 
 ### Claude Code tool names typed as Bash commands
+
+**Instead:** Invoke the tool directly as a tool call with its real parameters
+(e.g., the Grep tool with `pattern='^## '`, `path='docs/CHANGELOG.md'`).
+
+**Why:** `Grep`, `Read`, `Glob`, `Edit`, `Write`, `Task`, `WebFetch`, and
+`WebSearch` are Claude Code TOOLS, not shell commands. Pasting the tool
+name into Bash runs whatever (if anything) is on `PATH` by that name --
+not the actual tool.
 
 **Blocked:** `Grep -n "^## " docs/CHANGELOG.md`, `Read README.md`,
 `Glob "**/*.py"`, `Edit file.py`, `Write /tmp/x.py`. Also caught when
@@ -477,15 +485,6 @@ A grep pattern that *contains* a tool name does not hit *this* deny:
 matters). Note it is still denied by the file-`grep` rule above if a
 file path argument is present -- a file search is a file search
 regardless of what the pattern spells.
-
-**Why:** `Grep`, `Read`, `Glob`, `Edit`, `Write`, `Task`, `WebFetch`, and
-`WebSearch` are Claude Code TOOLS, not shell commands. Pasting the tool
-name into Bash runs whatever (if anything) is on `PATH` by that name --
-not the actual tool.
-
-**Instead:** Invoke the tool directly as a tool call with its real
-parameters (e.g., the Grep tool with `pattern='^## '`,
-`path='docs/CHANGELOG.md'`).
 
 ### Pipe-only commands (allowed in pipes, denied as the lead command)
 
@@ -505,13 +504,6 @@ hits a deny that steers to the Read or Grep tool.
 
 ### `tsc` via `node_modules` paths
 
-**Blocked:** `./node_modules/.bin/tsc`, `./node_modules/typescript/bin/tsc`,
-`/abs/path/node_modules/typescript/bin/tsc`,
-`node node_modules/typescript/bin/tsc`
-
-**Why:** Project-local `tsc` paths are a workaround for `npx tsc` failing.
-Retrying different invocation forms wastes turns and masks missing installs.
-
 **Instead:** Use `npx tsc` (whitelisted). If `npx tsc` fails because TypeScript
 is not installed, run exactly one of these two commands (both are whitelisted):
 
@@ -521,18 +513,17 @@ npm install -g typescript           # allowed
 ```
 
 Any other `npm install` variation (different flags, version pins, extra
-packages, bare `npm install`) still passes through for user approval.
+packages, bare `npm install`) still passes through for user approval. Do not
+work around the failure with absolute paths, `node node_modules/...`, or
+`source source_me.sh &&` chains.
 
-Do not work around the failure with absolute paths, `node node_modules/...`,
-or `source source_me.sh &&` chains.
+**Why:** Project-local `tsc` paths are a workaround for `npx tsc` failing.
+Retrying different invocation forms wastes turns and masks missing installs.
+
+**Blocked:** `./node_modules/.bin/tsc`, `./node_modules/typescript/bin/tsc`,
+`/abs/path/node_modules/typescript/bin/tsc`, `node node_modules/typescript/bin/tsc`.
 
 ### `ffprobe` (steered to `mediainfo`)
-
-**Blocked:** `ffprobe file.m4b`, `ffprobe -show_streams file.mp3`,
-`ffprobe -i file.wav`
-
-**Why:** `mediainfo` produces cleaner JSON for container, codec, and track
-metadata and is the preferred tool.
 
 **Instead:** Use `mediainfo --Output=JSON <file>`. `ffprobe` is allowed
 only with the flags `mediainfo` cannot replicate:
@@ -544,26 +535,38 @@ ffprobe -show_frames  file.mp4    # allowed (per-frame timing)
 ffprobe -f lavfi -i sine=440      # allowed (synthetic/lavfi probe)
 ```
 
+**Why:** `mediainfo` produces cleaner JSON for container, codec, and track
+metadata and is the preferred tool.
+
+**Blocked:** `ffprobe file.m4b`, `ffprobe -show_streams file.mp3`,
+`ffprobe -i file.wav`.
+
 ### `perl` on `.pg`/`.pgml` files
 
-**Blocked:** `perl -c problem.pgml`, `perl problem.pg`
+**Instead:** Use the `/webwork-writer` skill lint guide to validate WeBWorK problems.
 
 **Why:** PGML is not standard Perl. Running perl on these files produces misleading
 results.
 
-**Instead:** Use the `/webwork-writer` skill lint guide to validate WeBWorK problems.
+**Blocked:** `perl -c problem.pgml`, `perl problem.pg`.
 
 ### Heredocs (`<<EOF`)
-
-**Blocked:** `python3 - <<EOF`, `bash <<'SCRIPT'`
-
-**Why:** Heredocs are hard to read, lint, and test.
 
 **Instead:** Write code to a `_temp.py` or `_temp.sh` file using the Write tool,
 then run it with `source source_me.sh && python3 _temp.py` or `bash _temp.sh`.
 Underscore-prefixed files can be removed freely.
 
+**Why:** Heredocs are hard to read, lint, and test.
+
+**Blocked:** `python3 - <<EOF`, `bash <<'SCRIPT'`.
+
 ### `for` and `while` loops
+
+**Instead:** Write the loop into a `_temp.py` or `_temp.sh` file, run it with
+`bash _temp.sh` (or `source source_me.sh && python3 _temp.py`), then remove
+the temp file.
+
+**Why:** Loop logic belongs in script files, not inline Bash.
 
 **Blocked:** `for f in *.py; do ...`, `while read line; do ...`, and pipeline
 forms like `ls *.md | while read f; do ...; done` or
@@ -571,52 +574,65 @@ forms like `ls *.md | while read f; do ...; done` or
 start-of-leaf, after a `|`, `;`, or `&` character, or after a `do ` (a loop
 nested inside a `do ... done` body).
 
-**Why:** Loop logic belongs in script files, not inline Bash.
-
-**Instead:** Write the loop into a `_temp.py` or `_temp.sh` file, run it with
-`bash _temp.sh` (or `source source_me.sh && python3 _temp.py`), then remove
-the temp file.
-
 ### `bash -c` / `bash -lc`
-
-**Blocked:** `bash -c "command"`, `bash -lc "source && python3 ..."`
-
-**Why:** The Bash tool already runs bash. `bash -c` is redundant bash-in-bash.
 
 **Instead:** Run the command directly: `source source_me.sh && python3 script.py`.
 Running a script file (`bash script.sh`) is still allowed. `bash -n script.sh`
 (syntax check) is denied separately -- inspect the script with the Read tool.
 
+**Why:** The Bash tool already runs bash. `bash -c` is redundant bash-in-bash.
+
+**Blocked:** `bash -c "command"`, `bash -lc "source && python3 ..."`.
+
 ### `bash`/`sh`/`zsh -n` (syntax check)
-
-**Blocked:** `bash -n script.sh`, `sh -n x.sh`, `zsh -n x.sh`. Covers
-absolute-path and `command`/`env` prefixes.
-
-**Why:** Steers agents away from using the shell as a script-analysis tool.
 
 **Instead:** Inspect the script with the Read tool. If you need to run it,
 use `bash script.sh` (allowed) or ask for explicit user approval.
 
+**Why:** Steers agents away from using the shell as a script-analysis tool.
+
+**Blocked:** `bash -n script.sh`, `sh -n x.sh`, `zsh -n x.sh`. Covers
+absolute-path and `command`/`env` prefixes.
+
 ### `sudo`
-
-**Blocked:** `sudo command`
-
-**Why:** Do not escalate to root. Ask the user to run privileged commands manually.
 
 **Instead:** Ask the user to run the command as root if truly necessary.
 
+**Why:** Do not escalate to root.
+
+**Blocked:** `sudo command`.
+
 ### `git reset --hard`
 
-**Blocked on protected branches:** Destructive history rewrite. Denied on protected
-branches (`main`, `master`); allowed on agent/feature branches for local work.
+**Instead (on protected branches):** Use safer alternatives like
+`git checkout -- file` or `git restore file` to discard working changes.
 
-**Instead on protected:** Use safer alternatives like `git checkout -- file` or
-`git restore file` to discard working changes.
+**On agent branches:** `git reset --hard` is allowed for local cleanup and
+rebasing your own work.
 
-**On agent branches:** `git reset --hard` is allowed for local cleanup and rebasing
-your own work.
+**Why:** On `main`/`master`, `git reset --hard` is a destructive history
+rewrite that destroys uncommitted work and changes the branch tip.
+
+**Blocked on protected branches:** `git reset --hard`. Allowed on
+agent/feature branches.
 
 ### `git restore .` and `git checkout -- .` (wholesale discard)
+
+**Instead:** Discard a single file at a time:
+
+- `git restore path/to/file.py` (allowed)
+- `git restore --staged path/to/file.py` (allowed)
+- `git checkout -- one_file.py` (allowed)
+- `git checkout HEAD~1 -- file.py` (allowed)
+
+Branch switches (`git checkout main`, `git checkout -b feature/x`) remain
+allowed unchanged. If you really want to wipe everything, ask the user to
+run the command themselves.
+
+**Why:** These forms have the same blast radius as `git reset --hard` --
+they wipe every uncommitted change and unstage all renames in one shot.
+That destroys agent work in progress (edits, renames, staged content) with
+no recovery path other than `git reflog`.
 
 **Blocked:** Any `git restore` or `git checkout` invocation whose pathspec is
 `.` or `:/` (the "all tracked files" selector). Examples:
@@ -631,118 +647,105 @@ your own work.
 - `git checkout main -- .`
 - `git checkout :/`
 
-**Why:** These forms have the same blast radius as `git reset --hard` --
-they wipe every uncommitted change and unstage all renames in one shot.
-That destroys agent work in progress (edits, renames, staged content) with
-no recovery path other than `git reflog`.
-
-**Instead:** Discard a single file at a time:
-
-- `git restore path/to/file.py` (allowed)
-- `git restore --staged path/to/file.py` (allowed)
-- `git checkout -- one_file.py` (allowed)
-- `git checkout HEAD~1 -- file.py` (allowed)
-
-Branch switches (`git checkout main`, `git checkout -b feature/x`) remain
-allowed unchanged. If you really want to wipe everything, ask the user to
-run the command themselves.
-
 ### `git push --force` (including --force-with-lease)
-
-**Blocked:** `git push --force`, `git push origin main --force-with-lease`
-
-**Why:** Destructive remote history change.
 
 **Instead:** Ask the user to push manually if rebase is necessary.
 
+**Why:** Destructive remote history change.
+
+**Blocked:** `git push --force`, `git push origin main --force-with-lease`.
+
 ### `deno run` with URLs
-
-**Blocked:** `deno run https://example.com/script.ts`
-
-**Why:** Remote code execution. Download and review first.
 
 **Instead:** Download with `curl` to a file, review it, then run locally.
 
+**Why:** Remote code execution. Download and review first.
+
+**Blocked:** `deno run https://example.com/script.ts`.
+
 ### `curl`/`wget` piped to runtime
 
-**Blocked:** `curl https://example.com/install.sh | bash`, `wget -O - url | python3`
+**Instead:** Download to a file first with `curl -o script.sh https://...`,
+review, then run.
 
 **Why:** Executes remote code without local review.
 
-**Instead:** Download to a file first with `curl -o script.sh https://...`, review,
-then run.
+**Blocked:** `curl https://example.com/install.sh | bash`,
+`wget -O - url | python3`.
 
 ### Write/Edit to system directories
 
-**Blocked:** Writing to `/etc/`, `/usr/`, `/opt/`, `/System/`, `/Library/`
+**Instead:** Write to `~/nsh/` or `/tmp/` instead.
 
 **Why:** System files should only be modified by root or package managers.
 
-**Instead:** Write to `~/nsh/` or `/tmp/` instead.
+**Blocked:** Writing to `/etc/`, `/usr/`, `/opt/`, `/System/`, `/Library/`.
 
 ### `mv`
 
-**Blocked:** `mv old.py new.py`
+**Instead:** `git mv old.py new.py`. For untracked files, use `cp` + `rm` or
+ask the user.
 
 **Why:** Use `git mv` for tracked files to preserve history.
 
-**Instead:** `git mv old.py new.py`. For untracked files, use `cp` + `rm` or ask
-the user.
+**Blocked:** `mv old.py new.py`.
 
 ### `VAR=$(...)` assignments
 
-**Blocked:** `PROJECT=$(basename $PWD)`, `OUTPUT=$(python3 script.py)`
+**Instead:** Use `source source_me.sh` for environment setup or inline the
+command directly.
 
 **Why:** Command substitution in assignments creates hidden side effects.
 
-**Instead:** Use `source source_me.sh` for environment setup or inline the command
-directly.
+**Blocked:** `PROJECT=$(basename $PWD)`, `OUTPUT=$(python3 script.py)`.
 
 ### `$PYTHON` variable
 
-**Blocked:** `$PYTHON script.py`, `${PYTHON} -m pytest`
+**Instead:** `python3 script.py`.
 
 **Why:** Use the actual interpreter name for clarity.
 
-**Instead:** `python3 script.py`
+**Blocked:** `$PYTHON script.py`, `${PYTHON} -m pytest`.
 
 ### `PYTHONDONTWRITEBYTECODE` / `PYTHONUNBUFFERED`
 
-**Blocked:** Setting these environment variables manually.
+**Instead:** `source source_me.sh && python3 ...`.
 
 **Why:** `source_me.sh` already exports these.
 
-**Instead:** `source source_me.sh && python3 ...`
+**Blocked:** Setting these environment variables manually.
 
 ### Bare variable assignments
 
-**Blocked:** `REPO_ROOT=/path/to/repo` (with no command following)
+**Instead:** Use space-separated env prefixes on one line:
+`REPO_ROOT=/path python3 script.py`.
 
 **Why:** The decomposer splits `A=x && cmd` into leaves; a bare `A=x` leaf is
 useless.
 
-**Instead:** Use space-separated env prefixes on one line: `REPO_ROOT=/path python3 script.py`
+**Blocked:** `REPO_ROOT=/path/to/repo` (with no command following).
 
 ### `gh` CLI
 
-**Blocked:** All `gh` commands.
+**Instead:** N/A. GitHub operations are not available via CLI; ask the user to
+run them manually.
 
 **Why:** `gh` is not installed on this system.
 
-**Instead:** N/A. GitHub operations are not available via CLI.
+**Blocked:** All `gh` commands.
 
 ### python `-c` (inline code)
+
+**Instead:** Write a `_temp.py` file and run it with
+`source source_me.sh && python3 _temp.py`.
+
+**Why:** Inline code is hard to lint and debug.
 
 **Blocked:** Every `python -c` form -- bare `python3 -c "print(1)"`, `python -c`,
 version-suffixed `python3.12 -c`, absolute-path binaries
 (`/opt/homebrew/bin/python3 -c`), `command`/`env` prefixes, and interpreter
 flags before `-c` (`python3 -B -c`). `python3 script.py` and `python3 -m pytest`
 are unaffected -- only the `-c` inline-code form is denied.
-
-**Why:** Inline code is hard to lint and debug.
-
-**Instead:** Write a `_temp.py` file and run it with
-`source source_me.sh && python3 _temp.py`.
 
 ## Worktrees and protected branches
 

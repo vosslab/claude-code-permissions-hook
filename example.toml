@@ -96,13 +96,13 @@ CLAUDE_PATH = "^$HOME/\\.claude/"
 [[deny]]
 tool = "Bash"
 command_regex = "\\brm\\s+(-[a-zA-Z]+\\s+)*(/(etc|usr|opt|System|Library|var|bin|sbin|Volumes|private|boot|dev|proc|sys|root|lib)(/|\\s|$)|/\\s*$|~\\s*$|\\$HOME(\\s|/?$)|\\*(\\s|$))"
-reason = "rm against system directories, /, ~, $HOME, or bare * is denied for safety. Use a specific path under ~/nsh/ or /tmp/."
+reason = "Use a specific path under ~/nsh/ or /tmp/. rm against system directories, /, ~, $HOME, or bare * is rejected to prevent accidental deletion."
 
 # Hard-deny rm with .. traversal. Always blocks even if other allow rules match.
 [[deny]]
 tool = "Bash"
 command_regex = "\\brm\\b[^|;&]*\\.\\.(/|\\s|$)"
-reason = "rm with .. traversal is denied. Use an explicit path inside the working tree."
+reason = "Use an explicit path inside the working tree. rm with `..` traversal is rejected because it escapes the intended directory."
 
 # Deny rm (with exceptions for safe patterns). The exclude carves out paths
 # under ~/nsh/ (matching the Write/Edit zone), /tmp/, caches, _prefix scratch
@@ -112,25 +112,25 @@ reason = "rm with .. traversal is denied. Use an explicit path inside the workin
 tool = "Bash"
 command_regex = "\\brm\\b"
 command_exclude_regex = "\\bgit\\s+rm\\b|\\brm\\s+(-[a-zA-Z]+\\s+)*/tmp/|\\brm\\s+(-[a-zA-Z]+\\s+)*\\S*[Cc]ache|\\brm\\s+(-[a-zA-Z]+\\s+)*(\\S*/)?_\\S+|\\brm\\s+(-[a-zA-Z]+\\s+)*(/Users/[^/\\s]+/nsh/|~/nsh/)\\S+|\\brm\\s+(-[a-zA-Z]+\\s+)*[A-Za-z][A-Za-z0-9_./-]*"
-reason = "rm is restricted outside ~/nsh/, /tmp/, caches, _prefix scratch files, and bare relative paths. For other deletions, write a path inside ~/nsh/, prefix the file with _, or move it to /tmp/ first."
+reason = "Use a path under ~/nsh/, prefix the file with `_`, or move it to /tmp/ first. rm outside ~/nsh/, /tmp/, caches, _prefix scratch files, and bare relative paths is rejected to prevent accidental deletion."
 
 # Deny sensitive file reads (.env, .secret contain credentials)
 [[deny]]
 tool = "Read"
 file_path_regex = "\\.(env|secret)$"
-reason = "Do not read .env or .secret files. These contain credentials. Ask the user to provide specific values you need."
+reason = "Ask the user to provide the specific values you need. Reading .env or .secret files is rejected because they contain credentials."
 
 # Deny bare mv (use git mv for tracked files)
 [[deny]]
 tool = "Bash"
 command_regex = "^mv\\b"
-reason = "Use 'git mv' for tracked files. If the file is untracked, use cp + rm or ask the user."
+reason = "Use `git mv old.py new.py` for tracked files. For untracked files, use `cp` + `rm` or ask the user. Bare `mv` is rejected to preserve git history."
 
 # Deny destructive podman operations (force removal, prune, kill, force stop)
 [[deny]]
 tool = "Bash"
 command_regex = "^podman\\s+(rm\\s+-f|rmi\\s+-f|kill|stop\\s+-t\\s*0|system\\s+prune|volume\\s+(rm|prune)|network\\s+(rm|prune)|image\\s+(rm|prune))\\b"
-reason = "Destructive podman operations (force removal, prune, kill, force stop) are restricted. Ask the user to run these manually if truly needed."
+reason = "Ask the user to run destructive podman operations manually (force removal, prune, kill, force stop). These are rejected to prevent unrecoverable container or volume loss."
 
 # --- Destructive git operations ---
 
@@ -140,13 +140,13 @@ reason = "Destructive podman operations (force removal, prune, kill, force stop)
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}stash\\b"
-reason = "git stash hides work and can lose it. To inspect changes without hiding them, use `git diff` and `git diff --staged`. To set work aside, commit it on an `agent/<task>` branch (a worktree works well) instead of stashing."
+reason = "Use `git diff` and `git diff --staged` to inspect changes without hiding them. To set work aside, commit it on an `agent/<task>` branch (a worktree works well). `git stash` is rejected because it hides work and can lose it."
 
 # Deny git clean (destructive, removes untracked files)
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}clean\\b"
-reason = "git clean is destructive and removes untracked files. Use targeted rm or manual cleanup instead."
+reason = "Use targeted `rm` against specific files, or ask the user to clean up manually. `git clean` is rejected because it destroys untracked files in one shot."
 
 # Deny wholesale-discard forms of git restore.
 # Matches `git restore .`, `git restore :/`, `git restore --staged --worktree .`,
@@ -157,7 +157,7 @@ reason = "git clean is destructive and removes untracked files. Use targeted rm 
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}restore\\b[^|;&]*\\s(?:\\.|:/)(?:\\s|$)"
-reason = "git restore with `.` or `:/` discards every tracked change in one shot and unstages renames, destroying uncommitted work. To discard a single file, use `git restore path/to/file`. To inspect changes, use `git diff` and `git diff --staged`. If you really want to wipe everything, ask the user to run it themselves."
+reason = "Use `git restore path/to/file` to discard a single file. Use `git diff` and `git diff --staged` to inspect changes. Ask the user to wipe everything if that is really what you want. `git restore .` or `:/` is rejected because it discards every tracked change and unstages renames, destroying uncommitted work."
 
 # Deny wholesale-discard forms of git checkout.
 # Matches `git checkout .`, `git checkout -- .`, `git checkout HEAD -- .`,
@@ -168,7 +168,7 @@ reason = "git restore with `.` or `:/` discards every tracked change in one shot
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}checkout\\b[^|;&]*\\s(?:\\.|:/)(?:\\s|$)"
-reason = "git checkout with `.` or `:/` discards every tracked change in one shot and unstages renames, destroying uncommitted work. To discard a single file, use `git checkout -- path/to/file`. To inspect changes, use `git diff` and `git diff --staged`. If you really want to wipe everything, ask the user to run it themselves."
+reason = "Use `git checkout -- path/to/file` to discard a single file. Use `git diff` and `git diff --staged` to inspect changes. Ask the user to wipe everything if that is really what you want. `git checkout .` or `:/` is rejected because it discards every tracked change and unstages renames, destroying uncommitted work."
 
 # git reset --hard is now branch-aware: see "Deny reset --hard on protected branches" below.
 
@@ -177,7 +177,7 @@ reason = "git checkout with `.` or `:/` discards every tracked change in one sho
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}push\\b.*(-f\\b|--force\\b|--force-with-lease\\b)"
-reason = "Force pushing can destroy remote history. Ask the user to run the push command manually so they can verify the target branch."
+reason = "Ask the user to run the force push manually so they can verify the target branch. Force push is rejected from agents because it destroys remote history."
 
 # --- Protected branch enforcement ---
 # These rules deny operations that would advance protected branch tips.
@@ -188,33 +188,33 @@ reason = "Force pushing can destroy remote history. Ask the user to run the push
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}push\\b.*\\b${PROTECTED_REFS}\\b"
-reason = "Push to protected branches blocked. The human pushes after merging and committing. Prepare a merge with: git merge --no-commit --no-ff agent/<task>"
+reason = "Prepare a merge with `git merge --no-commit --no-ff agent/<task>` and let the human review and push. Push to protected branches is rejected; the human pushes after merging and committing."
 
 # Deny local mutations on protected branches: commit
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}commit\\b"
 protected_branch_check = true
-reason = "Protected branch command blocked. You are on a protected branch.\n\nWorkflow: agents prepare the merge, the human commits and pushes.\n\n  git merge --no-commit --no-ff agent/<task>\n  # resolve conflicts, run tests, leave staged\n\nThe user will review with `git diff HEAD` and run the final `git commit` and `git push` themselves."
+reason = "Prepare a merge for human review and final commit:\n\n  git merge --no-commit --no-ff agent/<task>\n  # resolve conflicts, run tests, leave staged\n\nThe user reviews with `git diff HEAD` and runs the final `git commit` and `git push`. Direct commit (or reset --hard) on a protected branch is rejected -- the human owns the final commit."
 
 # Deny reset --hard on protected branches
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}reset\\s+--hard\\b"
 protected_branch_check = true
-reason = "Protected branch command blocked. You are on a protected branch.\n\nWorkflow: agents prepare the merge, the human commits and pushes.\n\n  git merge --no-commit --no-ff agent/<task>\n  # resolve conflicts, run tests, leave staged\n\nThe user will review with `git diff HEAD` and run the final `git commit` and `git push` themselves."
+reason = "Prepare a merge for human review and final commit:\n\n  git merge --no-commit --no-ff agent/<task>\n  # resolve conflicts, run tests, leave staged\n\nThe user reviews with `git diff HEAD` and runs the final `git commit` and `git push`. Direct commit (or reset --hard) on a protected branch is rejected -- the human owns the final commit."
 
 # Deny ref-plumbing against protected refs
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}(?:update-ref|symbolic-ref)\\b.*\\b${PROTECTED_REFS}\\b"
-reason = "Protected branch command blocked. Ref-plumbing against protected branches is not allowed."
+reason = "Use a feature branch for ref-plumbing operations. `update-ref`/`symbolic-ref` against protected refs is rejected."
 
 # Deny dangerous branch operations on protected names
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}branch\\s+(?:-f|--force|-D)\\b.*\\b${PROTECTED_BRANCHES}\\b"
-reason = "Protected branch command blocked. Cannot force-delete or force-overwrite protected branches."
+reason = "Use a feature branch name as the target. Force-deleting or force-overwriting a protected branch (`branch -f`/`-D`) is rejected."
 
 # Deny any merge on protected branches except the sanctioned prepare-shape
 # and --abort. The exclude carves out the legitimate forms; specific denies
@@ -225,20 +225,20 @@ tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}merge\\b"
 command_exclude_regex = "\\bmerge\\s+--abort\\b|\\bmerge\\s+(?:--no-commit\\s+--no-ff|--no-ff\\s+--no-commit)\\s+[A-Za-z0-9._/][A-Za-z0-9._/-]*\\s*$"
 protected_branch_check = true
-reason = "Protected branch command blocked. Use `git merge --no-commit --no-ff agent/<task>` on protected branches to prepare a merge for human review and final commit."
+reason = "Use `git merge --no-commit --no-ff agent/<task>` to prepare a merge for human review and final commit. Other merge forms on protected branches are rejected."
 
 # Unconditional deny: --continue forms finalize commits after conflict resolution
 # and violate the "human makes the commit" rule on every branch.
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}(?:merge|cherry-pick|revert|rebase)\\s+--continue\\b"
-reason = "git <verb> --continue creates a commit after conflict resolution. The human runs the final commit. Use `git <verb> --abort` if the operation went wrong, then resolve and re-prepare on a feature branch."
+reason = "Use `git <verb> --abort` if the operation went wrong, then resolve and re-prepare on a feature branch. `git <verb> --continue` is rejected because it finalizes a commit after conflict resolution; the human runs the final commit."
 
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}merge\\s+(?:--ff-only|--squash)"
 protected_branch_check = true
-reason = "Protected branch command blocked. Non-standard merge forms on protected branches. Use `git merge --no-commit --no-ff`."
+reason = "Use `git merge --no-commit --no-ff agent/<task>` instead. `--ff-only` and `--squash` on protected branches are rejected."
 
 # Allow the safe merge form on protected branches
 # Deny merge-prepare with -m / --message: the human writes the merge message.
@@ -246,14 +246,14 @@ reason = "Protected branch command blocked. Non-standard merge forms on protecte
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}merge\\s+(?:--no-commit\\s+--no-ff|--no-ff\\s+--no-commit)\\b.*\\s(?:-m|--message)\\b"
 protected_branch_check = true
-reason = "Protected branch command blocked. Do not use -m/--message on the merge-prepare command. Stage the merge with `git merge --no-commit --no-ff agent/<task>` and let the human write the commit message."
+reason = "Stage the merge with `git merge --no-commit --no-ff agent/<task>` and let the human write the commit message. `-m`/`--message` on the merge-prepare command is rejected."
 
 # Deny merge-prepare with a protected source branch (would merge protected into protected).
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}merge\\s+(?:--no-commit\\s+--no-ff|--no-ff\\s+--no-commit)\\s+${PROTECTED_BRANCHES}\\s*$"
 protected_branch_check = true
-reason = "Protected branch command blocked. The merge-prepare source must be a non-protected branch (e.g. agent/<task>)."
+reason = "Use a non-protected source branch (e.g. `agent/<task>`) as the merge-prepare source. Merging a protected branch into a protected branch is rejected."
 
 # Allow only the narrow merge-prepare form on protected branches:
 #   git merge --no-commit --no-ff <non-protected-branch>
@@ -278,14 +278,14 @@ reason = "Allowed: merge abort (escape hatch for conflict resolution failures)."
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}(?:cherry-pick|revert)\\b"
 protected_branch_check = true
-reason = "Protected branch command blocked. Cherry-pick and revert create commits on protected branches. Not allowed."
+reason = "Use a feature branch for cherry-pick or revert, then prepare a merge with `git merge --no-commit --no-ff`. Cherry-pick and revert on protected branches are rejected because they create commits."
 
 # Deny rebase on protected branches
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}rebase\\b"
 protected_branch_check = true
-reason = "Protected branch command blocked. Rebase on protected branches. Not allowed."
+reason = "Use a feature branch for rebase, then prepare a merge with `git merge --no-commit --no-ff`. Rebase on protected branches is rejected."
 
 # --- Privilege escalation ---
 
@@ -293,7 +293,7 @@ reason = "Protected branch command blocked. Rebase on protected branches. Not al
 [[deny]]
 tool = "Bash"
 command_regex = "\\bsudo\\b"
-reason = "Do not use sudo. Ask the user to run privileged commands manually."
+reason = "Ask the user to run privileged commands manually. `sudo` is rejected; agents do not escalate to root."
 
 # --- Remote code execution ---
 
@@ -301,14 +301,14 @@ reason = "Do not use sudo. Ask the user to run privileged commands manually."
 [[deny]]
 tool = "Bash"
 command_regex = "\\bdeno\\s+run\\s+.*https?://"
-reason = "Do not run remote Deno scripts. Download the file first, review it, then run the local copy with 'deno run local_file.ts'."
+reason = "Download the script first with `curl -o local_file.ts <url>`, review it, then run `deno run local_file.ts`. Running remote Deno scripts directly is rejected -- code from a URL is not auditable before execution."
 
 # Deny piping remote content to a runtime -- classic RCE pattern.
 # Covers curl/wget/fetch piped into any common interpreter or shell.
 [[deny]]
 tool = "Bash"
 command_regex = "\\b(curl|wget|fetch)\\b[^|]*\\|\\s*${TOOL_PATH}(python3?|bash|sh|zsh|node|ruby|perl)\\b"
-reason = "Do not pipe remote content to a runtime (curl | bash pattern). Download to a file first with curl -o, review it, then execute the local file."
+reason = "Download to a local file first with `curl -o <file> <url>`, review it, then execute. Piping remote content to a runtime (curl|bash, wget|python, etc.) is rejected -- it is the classic RCE shape."
 
 # --- Python environment steering ---
 
@@ -317,25 +317,25 @@ reason = "Do not pipe remote content to a runtime (curl | bash pattern). Downloa
 [[deny]]
 tool = "Bash"
 command_regex = "PYTHONDONTWRITEBYTECODE|PYTHONUNBUFFERED"
-reason = "Do not set PYTHONDONTWRITEBYTECODE or PYTHONUNBUFFERED manually. Use 'source source_me.sh && python3 ...' instead."
+reason = "Use `source source_me.sh && python3 ...` -- the shim already exports `PYTHONDONTWRITEBYTECODE` and `PYTHONUNBUFFERED`. Setting them manually is rejected as redundant."
 
 # Deny VAR=$(...) assignments as standalone commands.
 [[deny]]
 tool = "Bash"
 command_regex = "^[A-Za-z_]+=\\$\\("
-reason = "Do not use VAR=$(...) assignments. Use 'source source_me.sh' for environment setup or inline the command directly."
+reason = "Use `source source_me.sh` for environment setup, or inline the command directly. `VAR=$(...)` assignments are rejected because they hide side effects inside an assignment."
 
 # Deny $PYTHON variable - use python3 directly
 [[deny]]
 tool = "Bash"
 command_regex = "\\$PYTHON\\b|\\$\\{PYTHON\\}"
-reason = "Use 'python3' directly instead of $PYTHON variable."
+reason = "Use `python3` directly. The `$PYTHON` variable is rejected because the actual interpreter name is clearer."
 
 # Deny bare env-var-only assignment (no command following).
 [[deny]]
 tool = "Bash"
 command_regex = "^[A-Za-z_]+=[^\\s]+$"
-reason = "Environment variable assignment with no command. Run a command after the assignment (e.g. FOO=x command ...) or set the variable inside your script."
+reason = "Run a command after the assignment (e.g. `FOO=x command ...`), or set the variable inside your script. A bare `VAR=value` leaf with no command is rejected because the decomposer splits it into a useless leaf."
 
 # Deny python -c inline code in every invocation form: bare `python3 -c`,
 # `python -c`, version-suffixed `python3.12 -c`, absolute-path binaries
@@ -346,7 +346,7 @@ reason = "Environment variable assignment with no command. Run a command after t
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}python3?[^\\s]*\\s+(-\\S+\\s+)*-c\\b"
-reason = "Do not use python3 -c with inline code. Write a _temp.py file and run it with 'source source_me.sh && python3 _temp.py' (underscore-prefixed files can be removed freely)."
+reason = "Write a `_temp.py` file (underscore-prefixed files can be removed freely), then run `source source_me.sh && python3 _temp.py`. `python -c` with inline code is rejected because it is hard to lint and debug."
 
 # --- Shell anti-patterns ---
 
@@ -354,7 +354,7 @@ reason = "Do not use python3 -c with inline code. Write a _temp.py file and run 
 [[deny]]
 tool = "Bash"
 command_regex = "<<-?\\s*['\"]?\\w+"
-reason = "Do not use heredocs (<<EOF). Write code to a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
+reason = "Write code to a `_temp.py` or `_temp.sh` file (underscore-prefixed files can be removed freely) using the Write tool, then run it with `source source_me.sh && python3 _temp.py` or `bash _temp.sh`. Heredocs (`<<EOF`) are rejected because they are hard to read, lint, and test."
 
 # Deny for loops (force .py/.sh files for looping logic).
 # The anchor `(^|[|;&]\s*|\bdo\s+)` matches the `for` keyword at start-of-leaf,
@@ -365,21 +365,21 @@ reason = "Do not use heredocs (<<EOF). Write code to a _temp.py or _temp.sh file
 [[deny]]
 tool = "Bash"
 command_regex = "(^|[|;&]\\s*|\\bdo\\s+)for\\b"
-reason = "Do not use for loops in Bash tool. Write the logic in a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
+reason = "Write the loop in a `_temp.py` or `_temp.sh` file (underscore-prefixed files can be removed freely), then run `bash _temp.sh` or `source source_me.sh && python3 _temp.py`. Inline `for` loops in the Bash tool are rejected."
 
 # Deny while loops -- same anchoring as `for` above (start-of-leaf, after
 # pipe/semicolon/&/&&/||, or after `do `).
 [[deny]]
 tool = "Bash"
 command_regex = "(^|[|;&]\\s*|\\bdo\\s+)while\\b"
-reason = "Do not use while loops in Bash tool. Write the logic in a _temp.py or _temp.sh file instead (underscore-prefixed files can be removed freely)."
+reason = "Write the loop in a `_temp.py` or `_temp.sh` file (underscore-prefixed files can be removed freely), then run `bash _temp.sh` or `source source_me.sh && python3 _temp.py`. Inline `while` loops in the Bash tool are rejected."
 
 # Deny redundant bash -c / bash -lc wrappers inside the Bash tool.
 # The Bash tool already runs bash, so bash -c "cmd" is bash-in-bash.
 [[deny]]
 tool = "Bash"
 command_regex = "^bash\\s+-[a-zA-Z]*c[a-zA-Z]*\\s+"
-reason = "bash -c / bash -lc is redundant inside the Bash tool. Run the command directly."
+reason = "Run the command directly -- the Bash tool already runs bash. `bash -c` / `bash -lc` is rejected as bash-in-bash."
 
 # --- Tool steering (use dedicated Claude tools instead) ---
 
@@ -388,7 +388,7 @@ reason = "bash -c / bash -lc is redundant inside the Bash tool. Run the command 
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\b"
-reason = "Glob is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with pattern (e.g. '**/*.py') and path; it supports recursive patterns natively. For a shell-side file listing, `ls <dir>` and `git ls-files <pathspec>` stay allowed."
+reason = "Invoke the Glob tool: pattern='**/*.py', path=<dir>. For a shell-side file listing, `ls <dir>` and `git ls-files <pathspec>` are still allowed. `find` is rejected because Glob handles recursive patterns natively."
 
 # Deny `git grep`. Pattern: agents who hit the grep deny look for a Bash
 # escape hatch and reach for `git grep`, which would keep every search
@@ -399,7 +399,7 @@ reason = "Glob is a Claude Code tool call (like Read/Edit/Write). Invoke it dire
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}grep\\b"
-reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with pattern/path/glob/output_mode/head_limit; the tool replaces every Bash search form including `git grep`."
+reason = "Invoke the Grep tool: pattern=<regex>, path=<file or dir>, plus glob, output_mode, head_limit as needed. `git grep` is rejected; the Grep tool is the canonical search path."
 
 # Deny Claude Code tool names typed as Bash commands. Pattern: agents read
 # steering messages like "Use the Grep tool" and literally paste 'Grep ...'
@@ -410,7 +410,7 @@ reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it dire
 [[deny]]
 tool = "Bash"
 command_regex = "^\\s*(Grep|Read|Glob|Edit|Write|Task|WebFetch|WebSearch)\\b"
-reason = "Grep/Read/Glob/Edit/Write/Task/WebFetch/WebSearch are Claude Code TOOLS, not shell commands. Invoke them directly as tool calls, not through Bash. Example: use the Grep tool with pattern='^## ', path='docs/CHANGELOG.md' instead of `Grep -n '^## ' docs/CHANGELOG.md`."
+reason = "Invoke the tool directly as a tool call. Example: use the Grep tool with pattern='^## ', path='docs/CHANGELOG.md' instead of typing `Grep -n '^## ' docs/CHANGELOG.md` into Bash. `Grep`/`Read`/`Glob`/`Edit`/`Write`/`Task`/`WebFetch`/`WebSearch` are Claude Code TOOLS, not shell commands -- typing them into Bash runs whatever (if anything) is on PATH by that name."
 
 # Deny cat/head/tail when reading files (any path-shaped argument).
 # Pipeline leaves like 'head -5' (no file, consuming stdin) are not matched.
@@ -422,7 +422,7 @@ reason = "Grep/Read/Glob/Edit/Write/Task/WebFetch/WebSearch are Claude Code TOOL
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>]*/"
-reason = "Read is a Claude Code tool call (like Edit/Write). Invoke it directly with file_path and optional offset/limit; it is the canonical way to inspect a file from this harness. Pipeline forms (`... | head -5`, `... | tail -5`, `... | cat`) stay allowed for slicing piped stdout."
+reason = "Invoke the Read tool: file_path=<path>, with optional offset and limit. For piped stdout, `... | head -5`, `... | tail -5`, `... | cat` are still allowed. `cat`/`head`/`tail` against a file path is rejected because Read provides line numbers and bounded slicing."
 
 # Deny grep/rg when searching files (any path-shaped argument, relative or absolute).
 # Pipeline leaves like 'grep pattern' (no file, filtering stdin) are not matched.
@@ -435,14 +435,14 @@ reason = "Read is a Claude Code tool call (like Edit/Write). Invoke it directly 
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(grep|egrep|fgrep|rg)\\b[^>]*/"
-reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with pattern/path/glob/output_mode/head_limit; the tool replaces every Bash search form. The deny covers all binaries (grep, egrep, fgrep, rg, absolute paths like /usr/bin/grep or /opt/homebrew/.../grep). Pipeline filtering of stdout (`... | grep pat`, no file argument) stays allowed for slicing piped output."
+reason = "Invoke the Grep tool: pattern=<regex>, path=<file or dir>, plus glob, output_mode, head_limit as needed. For piped stdout, `... | grep pat` (no file argument) is still allowed. `grep`, `egrep`, `fgrep`, `rg`, and absolute-path forms (`/usr/bin/grep`, `/opt/homebrew/.../grep`) all route to the same tool."
 
 # Deny absolute-path grep/rg unconditionally. Calling via absolute path
 # (/usr/bin/grep, /opt/homebrew/bin/rg) is a deliberate bypass attempt.
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}/(?:[^/\\s]+/)+(grep|egrep|fgrep|rg)\\b"
-reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with pattern/path/glob/output_mode/head_limit; the tool replaces every Bash search form. The deny covers all binaries (grep, egrep, fgrep, rg, absolute paths like /usr/bin/grep or /opt/homebrew/.../grep). Pipeline filtering of stdout (`... | grep pat`, no file argument) stays allowed for slicing piped output."
+reason = "Invoke the Grep tool: pattern=<regex>, path=<file or dir>, plus glob, output_mode, head_limit as needed. For piped stdout, `... | grep pat` (no file argument) is still allowed. `grep`, `egrep`, `fgrep`, `rg`, and absolute-path forms (`/usr/bin/grep`, `/opt/homebrew/.../grep`) all route to the same tool."
 
 # Deny sed -n for line extraction when reading a file (path-shaped argument).
 # Pipeline leaves like '... | sed -n 250,400p' (no file, paginating stdin) are
@@ -454,7 +454,7 @@ reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it dire
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^>]*/"
-reason = "Read is a Claude Code tool call. Invoke it with file_path, offset, and limit to extract a line range from a file. The pipeline form (`... | sed -n '10,20p'`) stays allowed for slicing piped stdout, where Read does not apply."
+reason = "Invoke the Read tool: file_path=<path>, offset=<start>, limit=<count> to extract a line range from a file. For piped stdout, `... | sed -n '10,20p'` is still allowed. `sed -n` against a file path is rejected because Read does file-range extraction directly."
 
 # Deny awk entirely (every leaf, including pipeline leaves -- the decomposer
 # splits on '|' so a `... | awk ...` leaf is matched here too). Unlike the
@@ -467,14 +467,14 @@ reason = "Read is a Claude Code tool call. Invoke it with file_path, offset, and
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(awk|gawk|mawk)\\b"
-reason = "awk is denied. Most awk usage here is line-matching -- invoke the Grep tool directly (pattern/path/glob/output_mode/head_limit) instead of awk. For genuine field extraction, pipe the source through `cut`, or read the file with the Read tool and process it in a _temp.py script."
+reason = "Invoke the Grep tool (pattern/path/glob/output_mode/head_limit) for line-matching. For field extraction, pipe through `cut`, or read with the Read tool and process in a `_temp.py` script. `awk`/`gawk`/`mawk` is rejected including pipeline leaves -- no pipe exception."
 
 # Deny bash/sh/zsh -n shell-script syntax checks. Steers agents away from using
 # shell as a script-analysis tool. Inspect with the Read tool instead.
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(bash|sh|zsh)\\s+-n\\b"
-reason = "Do not use bash/sh/zsh -n to syntax-check shell scripts. Inspect the script with the Read tool. If execution is needed, ask for explicit user approval or run the script through an allowed project command."
+reason = "Inspect the script with the Read tool. To execute, use `bash script.sh` or ask for user approval. `bash`/`sh`/`zsh -n` syntax-check is rejected; the shell is not the right tool for script analysis."
 
 # --- WeBWorK steering ---
 
@@ -482,7 +482,7 @@ reason = "Do not use bash/sh/zsh -n to syntax-check shell scripts. Inspect the s
 [[deny]]
 tool = "Bash"
 command_regex = "^perl\\b.*\\.pg(ml)?\\b"
-reason = "Do not run perl on .pg or .pgml files. PGML is not standard Perl. Use the /webwork-writer skill lint guide to validate WeBWorK problems."
+reason = "Use the `/webwork-writer` skill lint guide to validate WeBWorK problems. Running `perl` on .pg/.pgml files is rejected because PGML is not standard Perl."
 
 # --- TypeScript steering ---
 
@@ -490,7 +490,7 @@ reason = "Do not run perl on .pg or .pgml files. PGML is not standard Perl. Use 
 [[deny]]
 tool = "Bash"
 command_regex = "\\bnode_modules/(\\.bin|typescript/bin)/tsc\\b"
-reason = "Use 'npx tsc' instead of calling tsc via node_modules paths. If 'npx tsc' fails because TypeScript is not installed, stop and tell the user: 'Please run: npm install --save-dev typescript' (or, for a global install: 'npm install -g typescript'). Do not work around the failure with absolute paths, 'node node_modules/...', or source_me.sh chains."
+reason = "Use `npx tsc`. If it fails because TypeScript is missing, ask the user to run `npm install --save-dev typescript` (or `npm install -g typescript` for a global install). Calling tsc via `node_modules` paths is rejected; do not work around the missing install with absolute paths, `node node_modules/...`, or `source_me.sh` chains."
 
 # --- Unavailable tools ---
 
@@ -498,7 +498,7 @@ reason = "Use 'npx tsc' instead of calling tsc via node_modules paths. If 'npx t
 [[deny]]
 tool = "Bash"
 command_regex = "^gh\\b"
-reason = "gh CLI is not installed. Do not use GitHub CLI commands."
+reason = "N/A: `gh` is not installed on this system. Ask the user to run GitHub CLI operations manually, or skip them."
 
 # --- Media tools steering ---
 
@@ -509,7 +509,7 @@ reason = "gh CLI is not installed. Do not use GitHub CLI commands."
 tool = "Bash"
 command_regex = "^ffprobe(\\s|$)"
 command_exclude_regex = "(\\s|^)-show_(chapters|packets|frames)\\b|(\\s|^)-f\\s+lavfi\\b"
-reason = "Prefer 'mediainfo --Output=JSON <file>' for container, codec, and track metadata. ffprobe is allowed only with -show_chapters, -show_packets, -show_frames, or -f lavfi -- the cases mediainfo cannot handle."
+reason = "Use `mediainfo --Output=JSON <file>` for container, codec, and track metadata. `ffprobe` is allowed only with `-show_chapters`, `-show_packets`, `-show_frames`, or `-f lavfi` -- the cases mediainfo cannot handle."
 
 # --- Sensitive-path reads ---
 # Block any command that references credential or auth files. Match is
@@ -519,7 +519,7 @@ reason = "Prefer 'mediainfo --Output=JSON <file>' for container, codec, and trac
 [[deny]]
 tool = "Bash"
 command_regex = "(/etc/(passwd|shadow|sudoers|hosts)\\b|~/\\.ssh/|~/\\.aws/credentials\\b|/Users/[^/]+/\\.ssh/|/Users/[^/]+/\\.aws/credentials\\b)"
-reason = "Do not read system credential or auth files. If you need user or host info, ask the user."
+reason = "Ask the user for user or host info. Reading system credential or auth files (`/etc/passwd`, `/etc/shadow`, `/etc/sudoers`, `~/.ssh/`, `~/.aws/credentials`) is rejected."
 
 # --- Registry-mutating package commands ---
 # These change global state on package registries (or local credential
@@ -529,12 +529,12 @@ reason = "Do not read system credential or auth files. If you need user or host 
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}cargo\\s+(publish|yank|login|logout|owner)\\b"
-reason = "Registry-mutating cargo commands (publish/yank/login/logout/owner) require human authorization. Ask the user to run them manually."
+reason = "Ask the user to run registry-mutating cargo commands manually (`publish`/`yank`/`login`/`logout`/`owner`). They require human authorization because they change global registry state."
 
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}npm\\s+(publish|unpublish|deprecate|owner|adduser|login|logout|token)\\b"
-reason = "Registry-mutating npm commands (publish/unpublish/deprecate/owner/adduser/login/logout/token) require human authorization. Ask the user to run them manually."
+reason = "Ask the user to run registry-mutating npm commands manually (`publish`/`unpublish`/`deprecate`/`owner`/`adduser`/`login`/`logout`/`token`). They require human authorization because they change global registry state."
 
 # --- System package install ---
 # brew install/uninstall/upgrade modifies system-wide packages. Deny
@@ -542,7 +542,7 @@ reason = "Registry-mutating npm commands (publish/unpublish/deprecate/owner/addu
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}brew\\s+(install|uninstall|reinstall|upgrade|tap|untap|cask)\\b"
-reason = "Do not install or modify system packages with brew. Ask the user to run brew commands manually."
+reason = "Ask the user to run `brew install`/`uninstall`/`reinstall`/`upgrade`/`tap`/`untap`/`cask` manually. System-package modification is rejected from agents."
 
 # --- Path scoping (blast radius control) ---
 
@@ -550,12 +550,12 @@ reason = "Do not install or modify system packages with brew. Ask the user to ru
 [[deny]]
 tool = "Write"
 file_path_regex = "^/(etc|usr|opt|System|Library)/"
-reason = "Cannot write to system directories. Use project paths under ~/projects/ or scratch files in /tmp/."
+reason = "Use project paths under ~/projects/ or scratch files in /tmp/. Writing to system directories (`/etc/`, `/usr/`, `/opt/`, `/System/`, `/Library/`) is rejected."
 
 [[deny]]
 tool = "Edit"
 file_path_regex = "^/(etc|usr|opt|System|Library)/"
-reason = "Cannot edit system files. Use project paths under ~/projects/ or scratch files in /tmp/."
+reason = "Use project paths under ~/projects/ or scratch files in /tmp/. Editing system files (`/etc/`, `/usr/`, `/opt/`, `/System/`, `/Library/`) is rejected."
 
 # ===================================================================
 # ALLOW rules

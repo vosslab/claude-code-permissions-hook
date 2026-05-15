@@ -329,6 +329,39 @@ subagent_type = "codebase-analyzer"
 4. **Check the audit log** - Review `/tmp/claude-tool-use.json` to understand patterns
 5. **Validate config** - Run `claude-code-permissions-hook validate --config your.toml`
 
+## Deny message style
+
+Deny `reason` strings are injected into the agent's next turn, so they should
+lead with the recovery path, not the prohibition. The deny itself is already
+self-evident from the hook's refusal; the `reason` slot is the single best
+surface for steering.
+
+- Start each deny reason with the next concrete action the agent should take.
+  Prefer an imperative tool call or command: `Use ...`, `Run ...`, `Invoke ...`,
+  `Write ...`.
+- Use `Ask the user to ...` when no safe automatic action exists.
+- Use `N/A: ...` only when the feature is unavailable on this system.
+- Keep rationale short and place it after the recovery path. Put blocked
+  command shapes last when they are useful for diagnosis.
+
+Preferred shape:
+
+```toml
+reason = "Use `git mv old.py new.py` for tracked files. Plain `mv` is rejected because it can hide renames from git history."
+```
+
+Avoid this shape:
+
+```toml
+reason = "mv is denied. Use git mv old.py new.py."
+```
+
+This convention is enforced by review, not by an automated check. The same
+ordering (recovery path first) applies to deny subsections in
+[docs/CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md): each `###`
+subsection under `## Denied commands` leads with `**Instead:**`, then
+`**Why:**`, then `**Blocked:**`.
+
 ## See Also
 
 - [TOOL_INPUT_SCHEMAS.md](./TOOL_INPUT_SCHEMAS.md) - complete reference for all Claude Code tool inputs

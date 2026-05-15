@@ -20,7 +20,8 @@ cargo test                                                # Rust tests
 source source_me.sh && python3 tools/run_command_decisions.py
                                                           # decision-table
                                                           # regression
-source source_me.sh && python3 -m pytest tests/           # Python lint gates
+source source_me.sh && python3 -m pytest tests/           # Python lint +
+                                                          # TOML invariants
 ```
 
 To run only the Rust integration tests:

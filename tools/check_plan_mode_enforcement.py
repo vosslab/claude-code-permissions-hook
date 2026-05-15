@@ -47,6 +47,7 @@ import sys
 import json
 import shutil
 import hashlib
+import tempfile
 import subprocess
 
 # --- terminal colors ---
@@ -401,10 +402,10 @@ def run_test() -> int:
 
 	# --- setup test directory in /tmp (allowed by the hook's write rules) ---
 	# macOS tempfile.gettempdir() returns /var/folders/.../T/ which may not
-	# be covered by all hook configs. Use /tmp explicitly so the hook
-	# auto-allows Write/Edit and the test can focus on plan mode.
-	test_dir = "/tmp/plan_mode_test"  # nosec B108
-	os.makedirs(test_dir, exist_ok=True)
+	# be covered by all hook configs. Anchor the parent at /tmp so the hook
+	# auto-allows Write/Edit, but use mkdtemp so concurrent invocations do
+	# not collide on a shared fixed-name directory.
+	test_dir = tempfile.mkdtemp(prefix="plan_mode_test_", dir="/tmp")  # nosec B108
 
 	# track all created temp files for cleanup
 	temp_files: list[str] = []

@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-05-16
+
+### Fixes and Maintenance
+
+- Reworked `tests/test_toml_parse.py` to glob every repo-root `*.toml` instead of hard-coding the file list. `claude-code-permissions-hook.toml` is a local symlink and is not present on every checkout, so a static list would either skip it (silent gap) or fail on clean clones. The new test parses each TOML found at the repo root with `tomllib` and asserts every `[[deny]]` rule carries a non-empty `reason`. Added a third test, `test_example_and_live_config_reason_parity`, which closes the WP-A2 gap from 2026-05-15: when both `example.toml` and `claude-code-permissions-hook.toml` are present it compares deny `reason` arrays index-by-index, normalizing `~/nsh/` <-> `~/projects/` so the intentional path-personalization swap on Write/Edit system-dir denies is the only divergence allowed. `pytest tests/test_toml_parse.py` now runs 7 cases (3 parses, 3 reason-presence checks, 1 parity).
+- Replaced the fixed `/tmp/plan_mode_test` directory in `tools/test_plan_mode_enforcement.py` with `tempfile.mkdtemp(prefix="plan_mode_test_", dir="/tmp")` so concurrent runs of the diagnostic do not collide on a shared name. Parent stays anchored at `/tmp` so the hook's Write/Edit auto-allow still covers it.
+- Updated `tests/README.md` to describe `pytest tests/` as "Python lint + TOML invariants" rather than "Python lint gates", since `tests/test_toml_parse.py` now enforces TOML parse and deny-reason invariants from the fast lane.
+- Replaced the dangling `docs/MARKDOWN_STYLE.md#Denied-command-sections` link in `docs/CONFIGURATION_GUIDE.md` with an in-repo pointer to the `## Denied commands` ordering convention in `docs/CLAUDE_HOOK_USAGE_GUIDE.md`. The MARKDOWN_STYLE.md anchor never existed locally because that doc is centrally maintained and the new section was deferred upstream; the dangling link would have 404'd on GitHub.
+
+### Decisions and Failures
+
+- Kept `tools/run_command_decisions.py` in `tools/` as the E2E fixture runner for compiled-hook behavior; it is not redundant with `tests/test_toml_parse.py`. The pytest validates TOML parse and deny-reason invariants in milliseconds without a build; the tool exercises the compiled Rust binary against ~1707 TSV fixtures and is the only check that observes real decision outcomes.
+- Left `tools/test_plan_mode_enforcement.py` in `tools/` despite its `test_` prefix violating `docs/E2E_TESTS.md` naming. It is a manual Claude CLI probe, not a pytest, and `conftest.py` does not collect from `tools/`. Cleaner name (`tools/check_plan_mode_enforcement.py`) is out of scope for this PR.
+
+## 2026-05-15
+
+### Behavior or Interface Changes
+
+- Rewrote all 54 deny `reason` strings in `example.toml` and `claude-code-permissions-hook.toml` (the live config; symlink to `~/nsh/junk-drawer/CODEX/claude/claude-code-permissions-hook.toml`) to lead with the next recoverable action instead of the prohibition. Reason text is injected into the agent's next turn after a deny; the first sentence is the highest-attention slot, so opening with the imperative ("Use `git mv` ...", "Invoke the Grep tool: pattern=...") gets the agent unstuck faster than opening with "blocked"/"denied"/"Do not". Standard shape: solution sentence first, rationale clause second, blocked enumeration trailing. Two reasons use `Ask the user to ...` (sudo, force push, podman destructive, registry mutations); one uses `N/A: ...` (gh CLI). The protected-branch workflow block (commit + reset --hard share text) was preserved verbatim with only the leading sentence reordered. Path personalization (~/projects/ in example.toml vs. ~/nsh/ in the live config) is the only intentional diff between the two configs on reason text; a new `tests/test_toml_parse.py` plus a tomllib-based parity tool confirmed both. Rule regexes, allow rules, and `tests/command_decisions.tsv` are untouched -- 1707 fixtures still pass.
+- Rewrote the `## Denied commands` section of `docs/CLAUDE_HOOK_USAGE_GUIDE.md` to match the new TOML convention. Each `### <command>` subsection now orders its labelled blocks `**Instead:**` -> `**Why:**` -> `**Blocked:**` instead of the old `Blocked` -> `Why` -> `Instead`. Exception sections (`sed -n` with its `**Allowed (pipe usage):**` block, `git reset --hard` with branch-specific behavior, `git restore .` / `git checkout -- .` with their wholesale-discard enumeration) keep their extra blocks but place them after `**Instead:**`. No anchor labels moved (anchors are heading-derived); no rule regexes changed.
+
+### Additions and New Features
+
+- Added a `## Deny message style` section to `docs/CONFIGURATION_GUIDE.md` (maintainer-facing source of truth). Documents the recovery-path-first convention with preferred / avoided examples. Kept out of `docs/CLAUDE_HOOK_USAGE_GUIDE.md` because that guide is vendored to other repos and must stay agent-facing only.
+- Added `tests/test_toml_parse.py`: a fast tomllib-only parse check for both configs (no subprocess). Catches TOML syntax errors introduced by manual edits before the heavier `tools/run_command_decisions.py` fixture suite runs, so a parse regression is no longer blurred with a decision-logic regression. Also asserts every deny rule carries a non-empty `reason` field.
+
+### Decisions and Failures
+
+- Considered adding a `### Denied-command sections` block to `docs/MARKDOWN_STYLE.md` as a reusable documentation-ordering rule. Deferred: `docs/REPO_STYLE.md` marks `docs/MARKDOWN_STYLE.md` as centrally maintained ("do not edit locally"). Will recommend the addition upstream rather than editing the local copy.
+- Considered adding a one-sentence note to `## Bash-side reference for redirected commands` in `docs/CLAUDE_HOOK_USAGE_GUIDE.md` ("Deny messages should start with the tool call or command to try next"). Rejected: that guide is vendored to other repos and must stay agent-facing; maintainer convention belongs in `docs/CONFIGURATION_GUIDE.md`.
+
+### Developer Tests and Notes
+
+- `python3 tools/run_command_decisions.py`: 1707 fixtures pass against both `example.toml` and the live config (no expected-outcome changes; only `reason` text changed).
+- `pytest tests/test_toml_parse.py`: 2 passed.
+- `pytest tests/test_markdown_links.py tests/test_ascii_compliance.py`: 2 passed (guide rewrite preserved every link and stayed ASCII-clean).
+- Verified `readlink claude-code-permissions-hook.toml` still resolves to `~/nsh/junk-drawer/CODEX/claude/claude-code-permissions-hook.toml` after the edits; the Edit tool followed the symlink correctly.
+
 ## 2026-05-14
 
 ### Fixes and Maintenance
