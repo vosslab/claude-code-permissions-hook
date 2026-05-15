@@ -52,7 +52,7 @@ src/
 tests/
 +- integration_test.rs          Rust integration tests using JSON fixtures
 +- test_protected_branch.rs     Rust tests for protected-branch behavior
-+- command_decisions.tsv        Decision-table regression corpus (~490 rows)
++- command_decisions.tsv        Decision-table regression corpus (~1150 rows)
 +- test_config.toml             Synthetic config used by the Rust integration
 |                               tests + a small subset of TSV rows
 +- test_protected_branch_config.toml  Config for the protected-branch tests
@@ -79,10 +79,11 @@ tests/
 
 ```text
 tools/
-`- run_command_decisions.py     Drives tests/command_decisions.tsv against
-                                the live config + example.toml; lives here
-                                because it is operational tooling, not a
-                                pytest file
++- run_command_decisions.py     Drives tests/command_decisions.tsv against
+|                               the live config + example.toml; lives here
+|                               because it is operational tooling, not a
+|                               pytest file
+`- test_plan_mode_enforcement.py  Operational check for plan-mode tool gating
 ```
 
 ### [docs/](../docs/)

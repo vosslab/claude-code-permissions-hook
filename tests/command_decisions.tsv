@@ -51,8 +51,21 @@ deny	mv a.txt b.txt
 allow	python3 script.py
 allow	source source_me.sh && python3 script.py
 allow	pyflakes script.py
-deny	/opt/homebrew/bin/python3 -c "print('hello')"
 deny	python3 - <<EOF
+# python -c inline code: denied in every invocation form (bare, version-
+# suffixed, absolute-path, command/env prefix, flags before -c). Steered
+# to a _temp.py file. `python3 script.py` stays allowed -- no -c token.
+deny	python3 -c "print('hello')"
+deny	python -c "print(1)"
+deny	python3.12 -c "print(1)"
+deny	python3 -B -c "print(1)"
+deny	/opt/homebrew/bin/python3 -c "print('hello')"
+deny	/opt/homebrew/opt/python@3.12/bin/python3.12 -c "print(1)"
+deny	command python3 -c "print(1)"
+# Compound: source_me bootstrap then python3 -c. The decomposer splits on
+# `&&`; the second leaf `python3 -c ...` hits the deny.
+deny	source source_me.sh && python3 -c "print(1)"
+allow	python3 -m pytest tests/
 
 # --- Git: read-only and safe-write ---
 allow	git status
@@ -101,10 +114,35 @@ deny	Write /tmp/x.py
 # needing its own pipeline alternation.
 deny	cat /tmp/x | Grep foo
 deny	echo hi && Read README.md
-# Negative case: lowercase grep with a pattern that ENUMERATES tool
-# names must NOT be denied. Older mid-pipeline regex false-positived
-# on `\|Grep` inside the quoted argument.
-allow	grep -n "sed\|Grep\|Read" /tmp/x.toml
+# lowercase grep enumerating tool names must NOT hit the tool-name deny
+# rule (that rule anchors on a capital Grep/Read at start of leaf). But
+# WITH a file path it still hits the file-grep deny -- a file search is a
+# file search regardless of what the pattern spells.
+deny	grep -n "sed\|Grep\|Read" /tmp/x.toml
+# Negative case: same pattern with NO file arg is a stdin filter -> allow.
+allow	echo hi | grep -n "sed\|Grep\|Read"
+
+# --- grep file-search deny: '|' in the pattern must not let it leak ---
+# Regression: [^|]*/ stopped scanning at the first '|' inside the quoted
+# pattern, so any grep with alternation + a file path passed through.
+deny	grep -nE "a|b|c" /Users/vosslab/.claude/plans/x.md
+deny	grep -n -i "fill\|empty\|repeat" docs/active_plans/x.md
+deny	grep -n "foo\|bar" docs/active_plans/x.md
+# absolute-path grep with '|' alternation + file path
+deny	/usr/bin/grep -nE "a|b" /tmp/x.md
+# stdin filters with '|' alternation stay allowed (no file arg)
+allow	echo abc | grep -nE "a|b|c"
+# sed -n had the same [^|] regression: an address regex containing '|'
+# plus a file path must still deny.
+deny	sed -n '/a|b/,/c/p' /tmp/x.md
+deny	sed -n '/foo|bar/p' docs/active_plans/x.md
+# Known over-match (not a regression): a sed -n with a /regex/ address is
+# denied even as a stdin filter, because the '/' in the address looks like a
+# file path to the [^>]*/ scan. Same root cause as awk's /regex/ syntax.
+# Acceptable: stdin sed -n with a regex address is rare; Read or a _temp
+# script covers it. Plain-numeric stdin ranges (no '/') stay allowed.
+deny	echo abc | sed -n '/a|b/p'
+allow	printf 'a\nb\n' | sed -n '1,2p'
 
 # --- sudo / gh ---
 deny	sudo ls
@@ -159,7 +197,6 @@ deny	PYTHONUNBUFFERED=1 python3 x.py
 deny	PYTHONDONTWRITEBYTECODE=1 python3 x.py
 
 # --- Safe utilities (single command and pipelines) ---
-allow	awk 'NR==1' </tmp/x
 allow	jq . </tmp/x.json
 allow	sort -u </tmp/x
 allow	wc -l </tmp/x
@@ -206,8 +243,25 @@ allow	echo a | cat
 allow	printf 'a\nb\n' | head -1
 allow	printf 'a\nb\n' | tail -1
 allow	seq 1 5 | grep 3
-allow	printf 'a b\n' | awk '{print $2}'
 allow	seq 1 10 | wc -l
+
+# --- awk denied entirely (steered to the Grep tool) ---
+# awk was removed from TEXT_CMDS and given an unconditional deny. Both the
+# lead-command form and pipeline leaves are caught (the decomposer splits on
+# '|'). No file-path guard: awk as a stdin filter is denied too.
+deny	awk '/foo/{print}' docs/x.md
+deny	awk 'NR==1' /tmp/x
+deny	awk 'NR==1' </tmp/x
+deny	printf 'a b\n' | awk '{print $2}'
+deny	/usr/bin/awk '{print}' file.md
+deny	command awk '{print}' file.md
+deny	gawk '{print}' /tmp/x
+deny	mawk '{print}' /tmp/x
+# Pure awk-pipeline-leaf coverage: the source leaf (echo) is allowed, so a
+# deny here can only come from the awk leaf. (The earlier conflated row
+# `cat /tmp/x.log | awk` was removed -- the cat leaf denied independently,
+# masking which rule fired.)
+deny	echo a b | awk '{print $1}'
 
 # --- File-path forms of dedicated-tool deny rules ---
 deny	cat /tmp/x.log
@@ -684,3 +738,412 @@ deny	echo a && for f in a b c; do echo $f; done
 deny	find . -type f | while read -r f; do echo "$f"; done
 # Loop keyword nested inside a `do ... done` body (the `\bdo\s+` branch).
 deny	while true; do for f in a b; do echo $f; done; done
+
+# ===================================================================
+# SAFE_CMDS coverage matrix: every command in the TEXT/SEARCH/FORMAT/
+# INSPECT/CHECKSUM/FS/PROC/SYS/DEV groups, tested bare (no path) and
+# with a path argument. Purpose: lock in which commands carry a
+# file-path deny carve-out (cat/head/tail/grep/rg, plus sed -n) versus
+# which stay allowed even with a path arg. A regression in any
+# file-deny rule, or accidental removal of a command from SAFE_CMDS,
+# flips a row here.
+# ===================================================================
+
+# --- TEXT_CMDS: cat/head/tail have a file-path deny; the rest do not ---
+# (awk is intentionally absent -- denied entirely, covered above.)
+allow	cat
+deny	cat /tmp/x
+allow	head
+deny	head /tmp/x
+allow	tail
+deny	tail /tmp/x
+allow	colordiff
+allow	colordiff /tmp/x
+allow	comm
+allow	comm /tmp/x
+allow	cut
+allow	cut /tmp/x
+allow	diff
+allow	diff /tmp/x
+allow	od
+allow	od /tmp/x
+# sed: bare and plain-path allowed; only `sed -n <range> <file>` denies.
+allow	sed
+allow	sed 's/a/b/' /tmp/x
+allow	seq
+allow	seq /tmp/x
+allow	shuf
+allow	shuf /tmp/x
+allow	sort
+allow	sort /tmp/x
+allow	tac
+allow	tac /tmp/x
+allow	tee
+allow	tee /tmp/x
+allow	tr
+allow	tr /tmp/x
+allow	uniq
+allow	uniq /tmp/x
+allow	wc
+allow	wc /tmp/x
+allow	xargs
+allow	xargs /tmp/x
+
+# --- SEARCH_CMDS: grep/rg have a file-path deny; jq does not ---
+allow	grep foo
+deny	grep foo /tmp/x
+allow	rg foo
+deny	rg foo /tmp/x
+allow	jq
+allow	jq . /tmp/x
+
+# --- FORMAT_CMDS: no file-path denies ---
+allow	column
+allow	column /tmp/x
+allow	expand
+allow	expand /tmp/x
+allow	fmt
+allow	fmt /tmp/x
+allow	fold
+allow	fold /tmp/x
+allow	nl
+allow	nl /tmp/x
+allow	paste
+allow	paste /tmp/x
+allow	unexpand
+allow	unexpand /tmp/x
+
+# --- INSPECT_CMDS: no file-path denies ---
+allow	file
+allow	file /tmp/x
+allow	mediainfo
+allow	mediainfo /tmp/x
+allow	pdftotext
+allow	pdftotext /tmp/x
+
+# --- CHECKSUM_CMDS: no file-path denies ---
+allow	md5
+allow	md5 /tmp/x
+allow	md5sum
+allow	md5sum /tmp/x
+allow	shasum
+allow	shasum /tmp/x
+allow	sha256sum
+allow	sha256sum /tmp/x
+
+# --- FS_CMDS: no file-path denies ---
+allow	basename
+allow	basename /tmp/x
+allow	cd
+allow	cd /tmp/x
+allow	chmod
+allow	chmod /tmp/x
+allow	cp
+allow	cp /tmp/x
+allow	dirname
+allow	dirname /tmp/x
+allow	du
+allow	du /tmp/x
+allow	df
+allow	df /tmp/x
+allow	ln
+allow	ln /tmp/x
+allow	ls
+allow	ls /tmp/x
+allow	lsof
+allow	lsof /tmp/x
+allow	mkdir
+allow	mkdir /tmp/x
+allow	mktemp
+allow	mktemp /tmp/x
+allow	open
+allow	open /tmp/x
+allow	readlink
+allow	readlink /tmp/x
+allow	realpath
+allow	realpath /tmp/x
+allow	stat
+allow	stat /tmp/x
+allow	tar
+allow	tar /tmp/x
+allow	touch
+allow	touch /tmp/x
+allow	tree
+allow	tree /tmp/x
+allow	type
+allow	type /tmp/x
+allow	unlink
+allow	unlink /tmp/x
+allow	unzip
+allow	unzip /tmp/x
+allow	which
+allow	which /tmp/x
+
+# --- PROC_CMDS: no file-path denies ---
+allow	pgrep
+allow	pgrep /tmp/x
+allow	pkill
+allow	pkill /tmp/x
+allow	ps
+allow	ps /tmp/x
+allow	sleep
+allow	sleep /tmp/x
+allow	timeout
+allow	timeout /tmp/x
+
+# --- SYS_CMDS: no file-path denies ---
+allow	curl
+allow	curl /tmp/x
+allow	date
+allow	date /tmp/x
+allow	echo
+allow	echo /tmp/x
+allow	env
+allow	env /tmp/x
+allow	export
+allow	export /tmp/x
+allow	expr
+allow	expr /tmp/x
+allow	false
+allow	false /tmp/x
+allow	id
+allow	id /tmp/x
+allow	nproc
+allow	nproc /tmp/x
+allow	numfmt
+allow	numfmt /tmp/x
+allow	printenv
+allow	printenv /tmp/x
+allow	printf
+allow	printf /tmp/x
+allow	pwd
+allow	pwd /tmp/x
+allow	screencapture
+allow	screencapture /tmp/x
+allow	source
+allow	source /tmp/x
+allow	test
+allow	test /tmp/x
+allow	true
+allow	true /tmp/x
+allow	tty
+allow	tty /tmp/x
+allow	uname
+allow	uname /tmp/x
+allow	whoami
+allow	whoami /tmp/x
+allow	xcrun
+allow	xcrun /tmp/x
+allow	xxd
+allow	xxd /tmp/x
+
+# --- DEV_CMDS: no file-path denies ---
+allow	bandit
+allow	bandit /tmp/x
+allow	make
+allow	make /tmp/x
+allow	pyflakes
+allow	pyflakes /tmp/x
+
+# ===================================================================
+# SAFE_CMDS matrix, absolute-path binary form (/usr/bin/<cmd>).
+# The SAFE_CMDS allow rule is `^(${SAFE_CMDS})\b` -- NO ${TOOL_PATH} --
+# so an absolute-path invocation does NOT match the allow. Result:
+#   - cat/head/tail: passthrough bare (cat-deny needs a trailing '/'),
+#     deny with a path arg (cat-deny carries ${TOOL_PATH}).
+#   - grep/rg: deny either way -- the dedicated absolute-path grep deny
+#     (`^${TOOL_PREFIX}/(?:[^/\s]+/)+(grep|...)`) fires unconditionally.
+#   - sed: passthrough bare and with a plain path; `sed -n <range>
+#     <file>` denies (sed-deny carries ${TOOL_PATH}).
+#   - every other safe command: passthrough -- no allow match, no deny.
+# These passthrough rows are a deliberate monitored gap: absolute-path
+# benign tools are not auto-allowed. If that policy ever changes (e.g.
+# ${TOOL_PATH} added to the SAFE_CMDS allow), these rows flip and flag it.
+# ===================================================================
+
+# --- absolute-path: cat/head/tail (deny only with a path arg) ---
+passthrough	/usr/bin/cat
+deny	/usr/bin/cat /tmp/x
+passthrough	/usr/bin/head
+deny	/usr/bin/head /tmp/x
+passthrough	/usr/bin/tail
+deny	/usr/bin/tail /tmp/x
+
+# --- absolute-path: grep/rg/egrep/fgrep (denied unconditionally) ---
+deny	/usr/bin/grep foo
+deny	/usr/bin/grep foo /tmp/x
+deny	/usr/bin/rg foo
+deny	/usr/bin/rg foo /tmp/x
+deny	/usr/bin/egrep foo
+deny	/usr/bin/fgrep foo
+
+# --- absolute-path: sed (deny only the `-n <range> <file>` shape) ---
+passthrough	/usr/bin/sed
+passthrough	/usr/bin/sed s/a/b/ /tmp/x
+deny	/usr/bin/sed -n 1,5p /tmp/x
+
+# --- absolute-path: all other safe commands -> passthrough ---
+passthrough	/usr/bin/colordiff
+passthrough	/usr/bin/colordiff /tmp/x
+passthrough	/usr/bin/comm
+passthrough	/usr/bin/comm /tmp/x
+passthrough	/usr/bin/cut
+passthrough	/usr/bin/cut /tmp/x
+passthrough	/usr/bin/diff
+passthrough	/usr/bin/diff /tmp/x
+passthrough	/usr/bin/od
+passthrough	/usr/bin/od /tmp/x
+passthrough	/usr/bin/seq
+passthrough	/usr/bin/seq /tmp/x
+passthrough	/usr/bin/shuf
+passthrough	/usr/bin/shuf /tmp/x
+passthrough	/usr/bin/sort
+passthrough	/usr/bin/sort /tmp/x
+passthrough	/usr/bin/tac
+passthrough	/usr/bin/tac /tmp/x
+passthrough	/usr/bin/tee
+passthrough	/usr/bin/tee /tmp/x
+passthrough	/usr/bin/tr
+passthrough	/usr/bin/tr /tmp/x
+passthrough	/usr/bin/uniq
+passthrough	/usr/bin/uniq /tmp/x
+passthrough	/usr/bin/wc
+passthrough	/usr/bin/wc /tmp/x
+passthrough	/usr/bin/xargs
+passthrough	/usr/bin/xargs /tmp/x
+passthrough	/usr/bin/jq
+passthrough	/usr/bin/jq . /tmp/x
+passthrough	/usr/bin/column
+passthrough	/usr/bin/column /tmp/x
+passthrough	/usr/bin/expand
+passthrough	/usr/bin/expand /tmp/x
+passthrough	/usr/bin/fmt
+passthrough	/usr/bin/fmt /tmp/x
+passthrough	/usr/bin/fold
+passthrough	/usr/bin/fold /tmp/x
+passthrough	/usr/bin/nl
+passthrough	/usr/bin/nl /tmp/x
+passthrough	/usr/bin/paste
+passthrough	/usr/bin/paste /tmp/x
+passthrough	/usr/bin/unexpand
+passthrough	/usr/bin/unexpand /tmp/x
+passthrough	/usr/bin/file
+passthrough	/usr/bin/file /tmp/x
+passthrough	/usr/bin/mediainfo
+passthrough	/usr/bin/mediainfo /tmp/x
+passthrough	/usr/bin/pdftotext
+passthrough	/usr/bin/pdftotext /tmp/x
+passthrough	/usr/bin/md5
+passthrough	/usr/bin/md5 /tmp/x
+passthrough	/usr/bin/md5sum
+passthrough	/usr/bin/md5sum /tmp/x
+passthrough	/usr/bin/shasum
+passthrough	/usr/bin/shasum /tmp/x
+passthrough	/usr/bin/sha256sum
+passthrough	/usr/bin/sha256sum /tmp/x
+passthrough	/usr/bin/basename
+passthrough	/usr/bin/basename /tmp/x
+passthrough	/usr/bin/cd
+passthrough	/usr/bin/cd /tmp/x
+passthrough	/usr/bin/chmod
+passthrough	/usr/bin/chmod /tmp/x
+passthrough	/usr/bin/cp
+passthrough	/usr/bin/cp /tmp/x
+passthrough	/usr/bin/dirname
+passthrough	/usr/bin/dirname /tmp/x
+passthrough	/usr/bin/du
+passthrough	/usr/bin/du /tmp/x
+passthrough	/usr/bin/df
+passthrough	/usr/bin/df /tmp/x
+passthrough	/usr/bin/ln
+passthrough	/usr/bin/ln /tmp/x
+passthrough	/usr/bin/ls
+passthrough	/usr/bin/ls /tmp/x
+passthrough	/usr/bin/lsof
+passthrough	/usr/bin/lsof /tmp/x
+passthrough	/usr/bin/mkdir
+passthrough	/usr/bin/mkdir /tmp/x
+passthrough	/usr/bin/mktemp
+passthrough	/usr/bin/mktemp /tmp/x
+passthrough	/usr/bin/open
+passthrough	/usr/bin/open /tmp/x
+passthrough	/usr/bin/readlink
+passthrough	/usr/bin/readlink /tmp/x
+passthrough	/usr/bin/realpath
+passthrough	/usr/bin/realpath /tmp/x
+passthrough	/usr/bin/stat
+passthrough	/usr/bin/stat /tmp/x
+passthrough	/usr/bin/tar
+passthrough	/usr/bin/tar /tmp/x
+passthrough	/usr/bin/touch
+passthrough	/usr/bin/touch /tmp/x
+passthrough	/usr/bin/tree
+passthrough	/usr/bin/tree /tmp/x
+passthrough	/usr/bin/type
+passthrough	/usr/bin/type /tmp/x
+passthrough	/usr/bin/unlink
+passthrough	/usr/bin/unlink /tmp/x
+passthrough	/usr/bin/unzip
+passthrough	/usr/bin/unzip /tmp/x
+passthrough	/usr/bin/which
+passthrough	/usr/bin/which /tmp/x
+passthrough	/usr/bin/pgrep
+passthrough	/usr/bin/pgrep /tmp/x
+passthrough	/usr/bin/pkill
+passthrough	/usr/bin/pkill /tmp/x
+passthrough	/usr/bin/ps
+passthrough	/usr/bin/ps /tmp/x
+passthrough	/usr/bin/sleep
+passthrough	/usr/bin/sleep /tmp/x
+passthrough	/usr/bin/timeout
+passthrough	/usr/bin/timeout /tmp/x
+passthrough	/usr/bin/curl
+passthrough	/usr/bin/curl /tmp/x
+passthrough	/usr/bin/date
+passthrough	/usr/bin/date /tmp/x
+passthrough	/usr/bin/echo
+passthrough	/usr/bin/echo /tmp/x
+passthrough	/usr/bin/env
+passthrough	/usr/bin/env /tmp/x
+passthrough	/usr/bin/export
+passthrough	/usr/bin/export /tmp/x
+passthrough	/usr/bin/expr
+passthrough	/usr/bin/expr /tmp/x
+passthrough	/usr/bin/false
+passthrough	/usr/bin/false /tmp/x
+passthrough	/usr/bin/id
+passthrough	/usr/bin/id /tmp/x
+passthrough	/usr/bin/nproc
+passthrough	/usr/bin/nproc /tmp/x
+passthrough	/usr/bin/numfmt
+passthrough	/usr/bin/numfmt /tmp/x
+passthrough	/usr/bin/printenv
+passthrough	/usr/bin/printenv /tmp/x
+passthrough	/usr/bin/printf
+passthrough	/usr/bin/printf /tmp/x
+passthrough	/usr/bin/pwd
+passthrough	/usr/bin/pwd /tmp/x
+passthrough	/usr/bin/screencapture
+passthrough	/usr/bin/screencapture /tmp/x
+passthrough	/usr/bin/source
+passthrough	/usr/bin/source /tmp/x
+passthrough	/usr/bin/test
+passthrough	/usr/bin/test /tmp/x
+passthrough	/usr/bin/true
+passthrough	/usr/bin/true /tmp/x
+passthrough	/usr/bin/tty
+passthrough	/usr/bin/tty /tmp/x
+passthrough	/usr/bin/uname
+passthrough	/usr/bin/uname /tmp/x
+passthrough	/usr/bin/whoami
+passthrough	/usr/bin/whoami /tmp/x
+passthrough	/usr/bin/xcrun
+passthrough	/usr/bin/xcrun /tmp/x
+passthrough	/usr/bin/xxd
+passthrough	/usr/bin/xxd /tmp/x
+passthrough	/usr/bin/bandit
+passthrough	/usr/bin/bandit /tmp/x
+passthrough	/usr/bin/make
+passthrough	/usr/bin/make /tmp/x
+passthrough	/usr/bin/pyflakes
+passthrough	/usr/bin/pyflakes /tmp/x

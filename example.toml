@@ -19,7 +19,8 @@ protected_refs = ["refs/heads/main", "refs/heads/master"]
 [variables]
 # --- Safe command groups (harmless utilities only, NO runtimes) ---
 # Text processing (read/transform stdin or files, no side effects)
-TEXT_CMDS = "awk|cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs"
+# awk is intentionally excluded -- denied entirely (steered to the Grep tool).
+TEXT_CMDS = "cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs"
 # Search and query (find content within text or structured data)
 SEARCH_CMDS = "grep|jq|rg"
 # Formatting and layout (presentation of text)
@@ -336,11 +337,16 @@ tool = "Bash"
 command_regex = "^[A-Za-z_]+=[^\\s]+$"
 reason = "Environment variable assignment with no command. Run a command after the assignment (e.g. FOO=x command ...) or set the variable inside your script."
 
-# Deny hardcoded homebrew python -c (inline code)
+# Deny python -c inline code in every invocation form: bare `python3 -c`,
+# `python -c`, version-suffixed `python3.12 -c`, absolute-path binaries
+# (/opt/homebrew/bin/python3 -c, /opt/homebrew/opt/python@3.12/.../python3.12 -c),
+# and command/env prefixes. ${TOOL_PATH} covers the absolute-path forms;
+# the `(-\S+\s+)*` segment allows interpreter flags before -c (e.g.
+# `python3 -B -c`). `python3 script.py` is unaffected -- no -c token.
 [[deny]]
 tool = "Bash"
-command_regex = "/opt/homebrew/bin/python3[^\\s]*\\s+-c\\b"
-reason = "Do not use /opt/homebrew/bin/python3 -c with inline code. Write a _temp.py file and run it with 'source source_me.sh && python3 _temp.py' (underscore-prefixed files can be removed freely)."
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}python3?[^\\s]*\\s+(-\\S+\\s+)*-c\\b"
+reason = "Do not use python3 -c with inline code. Write a _temp.py file and run it with 'source source_me.sh && python3 _temp.py' (underscore-prefixed files can be removed freely)."
 
 # --- Shell anti-patterns ---
 
@@ -409,17 +415,26 @@ reason = "Grep/Read/Glob/Edit/Write/Task/WebFetch/WebSearch are Claude Code TOOL
 # Deny cat/head/tail when reading files (any path-shaped argument).
 # Pipeline leaves like 'head -5' (no file, consuming stdin) are not matched.
 # Covers absolute-path invocations (/bin/cat) and command/env prefixes.
+# Char class is [^>] (not [^>|]), matching the grep/sed denies: a '|' in a
+# leaf is always inside a quoted argument (real pipes are split by the
+# decomposer first), so excluding it would only break the rule on quoted
+# args. The '>' exclusion stays so a stdin filter with a redirect is not denied.
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>|]*/"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>]*/"
 reason = "Read is a Claude Code tool call (like Edit/Write). Invoke it directly with file_path and optional offset/limit; it is the canonical way to inspect a file from this harness. Pipeline forms (`... | head -5`, `... | tail -5`, `... | cat`) stay allowed for slicing piped stdout."
 
 # Deny grep/rg when searching files (any path-shaped argument, relative or absolute).
 # Pipeline leaves like 'grep pattern' (no file, filtering stdin) are not matched.
-# Covers command/env prefixes.
+# Covers command/env prefixes and absolute-path binaries via ${TOOL_PATH}.
+# The char class is [^>] (not [^>|]): grep patterns routinely contain '|'
+# alternation, and excluding '|' made the rule stop scanning before the file
+# path. Real pipelines are already split by the decomposer, so a bare '|' here
+# is always inside a quoted pattern, never a pipe boundary. The '>' exclusion
+# stays so a stdin filter with a redirect ('grep pat > /tmp/out') is not denied.
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}(grep|egrep|fgrep|rg)\\b[^|]*/"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(grep|egrep|fgrep|rg)\\b[^>]*/"
 reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it directly with pattern/path/glob/output_mode/head_limit; the tool replaces every Bash search form. The deny covers all binaries (grep, egrep, fgrep, rg, absolute paths like /usr/bin/grep or /opt/homebrew/.../grep). Pipeline filtering of stdout (`... | grep pat`, no file argument) stays allowed for slicing piped output."
 
 # Deny absolute-path grep/rg unconditionally. Calling via absolute path
@@ -433,10 +448,26 @@ reason = "Grep is a Claude Code tool call (like Read/Edit/Write). Invoke it dire
 # Pipeline leaves like '... | sed -n 250,400p' (no file, paginating stdin) are
 # NOT matched and remain allowed -- Read can't substitute for stdout pagination.
 # Covers absolute-path invocations and command/env prefixes.
+# Char class is [^>] (not [^>|]): a sed address regex can contain '|', and
+# excluding it would stop the scan before the file path -- the same regression
+# the grep file-search deny had. Real pipes are split by the decomposer first.
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^|]*/"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^>]*/"
 reason = "Read is a Claude Code tool call. Invoke it with file_path, offset, and limit to extract a line range from a file. The pipeline form (`... | sed -n '10,20p'`) stays allowed for slicing piped stdout, where Read does not apply."
+
+# Deny awk entirely (every leaf, including pipeline leaves -- the decomposer
+# splits on '|' so a `... | awk ...` leaf is matched here too). Unlike the
+# grep/sed denies, this has no file-path guard: awk is denied even as a stdin
+# filter. Rationale: in passthrough-log review, agent awk usage was almost
+# always line-matching ("find lines matching X, print them"), which is exactly
+# the Grep tool's job, and the awk attempts were consistently overcomplicated.
+# awk's '/regex/' syntax also makes a reliable file-vs-stdin guard impractical.
+# Covers awk, gawk, mawk via command/env prefixes and absolute paths.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(awk|gawk|mawk)\\b"
+reason = "awk is denied. Most awk usage here is line-matching -- invoke the Grep tool directly (pattern/path/glob/output_mode/head_limit) instead of awk. For genuine field extraction, pipe the source through `cut`, or read the file with the Read tool and process it in a _temp.py script."
 
 # Deny bash/sh/zsh -n shell-script syntax checks. Steers agents away from using
 # shell as a script-analysis tool. Inspect with the Read tool instead.

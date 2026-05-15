@@ -70,12 +70,13 @@ Validate the config file compiles without errors:
 ./target/release/claude-code-permissions-hook validate --config example.toml
 ```
 
-Expected output (with `RUST_LOG=info`):
+Expected output (with `RUST_LOG=info`); the rule counts reflect whatever
+config you pass:
 
 ```
 [INFO] Configuration is valid!
-[INFO]   Deny rules: 3
-[INFO]   Allow rules: 7
+[INFO]   Deny rules: <N>
+[INFO]   Allow rules: <N>
 [INFO]   Audit file: /tmp/claude-tool-use.json
 [INFO]   Audit level: Matched
 ```
