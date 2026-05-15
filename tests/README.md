@@ -10,7 +10,7 @@ This directory contains integration tests and test fixtures for the command perm
   `/Users/korny/Dropbox/prj/` path-zone setup
 - `command_decisions.tsv` - Decision-table regression corpus (allow / deny /
   passthrough per tool input) covering Bash and non-Bash tools
-- `command_decisions.tsv` is run by [tools/run_command_decisions.py](../tools/run_command_decisions.py); the runner lives in `tools/` since it is operational tooling, not a pytest file
+- `command_decisions.tsv` is run by [run_command_decisions.py](../tools/run_command_decisions.py); the runner lives in `tools/` since it is operational tooling, not a pytest file
 - `*.json` - Test fixture files used by `integration_test.rs`
 
 ## Running Tests

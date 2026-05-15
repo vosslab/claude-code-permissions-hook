@@ -82,7 +82,7 @@ JSON object with these fields:
 | `tool_name` | string | Tool being invoked (Bash, Read, Write, Edit, etc.) |
 | `tool_input` | object | Tool-specific parameters |
 
-See [docs/TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md) for per-tool input fields.
+See [TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md) for per-tool input fields.
 
 ### Output (stdout)
 
@@ -118,7 +118,7 @@ cargo test
 ```
 
 Decision-table regression (runs every row in
-[tests/command_decisions.tsv](../tests/command_decisions.tsv) against the
+[command_decisions.tsv](../tests/command_decisions.tsv) against the
 live config and `example.toml`; intentionally outside pytest):
 
 ```bash
@@ -129,4 +129,4 @@ source source_me.sh && python3 tools/run_command_decisions.py ffprobe  # filter
 ## Known gaps
 
 - [ ] Document supported tool names exhaustively (currently inferred from
-  [docs/TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md)).
+  [TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md)).

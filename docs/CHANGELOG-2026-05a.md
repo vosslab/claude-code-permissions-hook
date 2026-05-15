@@ -224,7 +224,7 @@ sessions:
   `-m`/`--message` on the merge-prepare line, and a protected source branch.
   These produce specific steering messages instead of falling through to
   passthrough.
-- Added [docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md) as the canonical
+- Added [WORKTREE_POLICY.md](WORKTREE_POLICY.md) as the canonical
   maintainer-facing reference for the protected-branch workflow,
   configuration, allowed/denied table, and security model.
 - Trimmed the protected-branch section in `docs/CLAUDE_HOOK_USAGE_GUIDE.md` to
@@ -274,7 +274,7 @@ sessions:
 This change is a guardrail for normal Git workflows, not a security boundary.
 Real enforcement belongs on the forge (branch protection, required PRs, no
 force push) and at the OS layer. Maintainer-facing detail in
-[docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md).
+[WORKTREE_POLICY.md](WORKTREE_POLICY.md).
 
 ## 2026-04-27
 
@@ -368,10 +368,10 @@ force push) and at the OS layer. Maintainer-facing detail in
 ### Tests
 
 - Mirrored both rules into
-  [tests/test_config.toml](../tests/test_config.toml) so integration
+  [test_config.toml](../tests/test_config.toml) so integration
   tests exercise them.
 - Added 23 parametrized cases in
-  [tests/test_hook.py](../tests/test_hook.py):
+  `tests/test_hook.py`:
   `test_git_grep_allowed` (8), `test_git_grep_command_substitution_blocked`
   (2), `test_python_m_pip_info_allowed` (8),
   `test_pip_install_passthrough` (5 regression cases covering
@@ -420,7 +420,7 @@ force push) and at the OS layer. Maintainer-facing detail in
 
 ### Documentation
 
-- Updated [docs/CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md):
+- Updated [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md):
   added `pdftotext` to safe utilities, added `esbuild` to the npx whitelist
   section, added a new "Podman (containers)" section under Allowed commands,
   added a new "`tsc` via `node_modules` paths" entry under Denied commands.
@@ -428,10 +428,10 @@ force push) and at the OS layer. Maintainer-facing detail in
 ### Tests
 
 - Mirrored the four new rules into
-  [tests/test_config.toml](../tests/test_config.toml) so they are covered by
+  [test_config.toml](../tests/test_config.toml) so they are covered by
   integration tests.
 - Added 47 parametrized cases in
-  [tests/test_hook.py](../tests/test_hook.py):
+  `tests/test_hook.py`:
   `test_pdftotext_allowed` (3),
   `test_npx_whitelist_allowed` (7),
   `test_npx_non_whitelist_passthrough` (2),
@@ -559,8 +559,8 @@ force push) and at the OS layer. Maintainer-facing detail in
   (e.g. `tools/runner.py`) now match allow rules
 - `open`, `which`, `type` added to `FS_CMDS`; `find` removed (has deny-and-steer rule)
 - Improved section comments across all TOML rule groups documenting trust rationale
-- Updated [docs/CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) and
-  [docs/configuration-guide.md](configuration-guide.md) with new trust model
+- Updated [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) and
+  [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) with new trust model
 
 ### Behavior or Interface Changes
 
@@ -592,7 +592,7 @@ force push) and at the OS layer. Maintainer-facing detail in
 
 ### Previous entries for 2026-03-26
 
-- Updated [docs/CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) to reflect
+- Updated [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) to reflect
   restructured permissions model: added trust model philosophy, env-var assignment
   decomposer behavior, new "Local runtimes" section with node/deno/npx details,
   npm read-only commands, expanded denied commands (sudo, git reset --hard,
@@ -642,7 +642,7 @@ force push) and at the OS layer. Maintainer-facing detail in
 
 ### Additions and New Features
 
-- Created [docs/CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md): comprehensive
+- Created [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md): comprehensive
   best-practices guide for AI agents working in repos that use the permissions hook.
   Covers allowed/denied/passthrough commands, file access zones, safe utility lists,
   common patterns cheat sheet, and preferred alternatives for every deny rule. Sourced
@@ -1001,9 +1001,9 @@ force push) and at the OS layer. Maintainer-facing detail in
   - Variables (SAFE_CMDS, NO_CMD_SUB, PROJECT_PATH, NO_TRAVERSAL)
   - Decomposer explanation comment, fixed git regex
 - Rewrote [README.md](../README.md) to be concise with links to docs/
-- Created [docs/INSTALL.md](INSTALL.md) with requirements, build steps, Claude Code
+- Created [INSTALL.md](INSTALL.md) with requirements, build steps, Claude Code
   hook setup, and verify command
-- Created [docs/USAGE.md](USAGE.md) with CLI reference, input/output format,
+- Created [USAGE.md](USAGE.md) with CLI reference, input/output format,
   examples, audit file descriptions, and test commands
 - Removed shebang from `tests/test_hook.py` (pytest-only file, not executable)
 - Added `# nosec B108` security annotations to 10 test data lines in
@@ -1142,8 +1142,8 @@ force push) and at the OS layer. Maintainer-facing detail in
     `\\bgit\\b.*\\bstash\\b`, `\\brm\\b`
 - Copied shared repo docs and test infrastructure from central repo
   - Added [AGENTS.md](../AGENTS.md), [CLAUDE.md](../CLAUDE.md), [source_me.sh](../source_me.sh)
-  - Added [docs/REPO_STYLE.md](REPO_STYLE.md), [docs/PYTHON_STYLE.md](PYTHON_STYLE.md),
-    [docs/MARKDOWN_STYLE.md](MARKDOWN_STYLE.md), [docs/AUTHORS.md](AUTHORS.md)
+  - Added [REPO_STYLE.md](REPO_STYLE.md), [PYTHON_STYLE.md](PYTHON_STYLE.md),
+    [MARKDOWN_STYLE.md](MARKDOWN_STYLE.md), [AUTHORS.md](AUTHORS.md)
   - Added shared test harnesses: `tests/test_shebangs.py`, `tests/test_bandit_security.py`,
     `tests/test_pyflakes_code_lint.py`, `tests/test_ascii_compliance.py`,
     `tests/test_whitespace.py`, `tests/test_indentation.py`,
@@ -1152,9 +1152,9 @@ force push) and at the OS layer. Maintainer-facing detail in
 
 ## 2025-12-06
 
-- Created [docs/configuration-guide.md](configuration-guide.md) with rule syntax
+- Created [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) with rule syntax
   for each supported tool (Read, Write, Edit, Bash, Task, Glob, Grep, WebFetch, WebSearch)
-- Created [docs/tool-input-schemas.md](tool-input-schemas.md) with Claude Code
+- Created [TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md) with Claude Code
   tool input JSON reference
 - Cleaned up [README.md](../README.md), moved detailed docs to `docs/`
 - Truncated audit log string fields at 256 characters to keep JSON-lines manageable

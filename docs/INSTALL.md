@@ -13,7 +13,7 @@ Claude Code is configured to invoke it.
 ### Development requirements (optional)
 
 - **Python 3.12** - for the decision-table runner
-  ([tools/run_command_decisions.py](../tools/run_command_decisions.py)) and
+  ([run_command_decisions.py](../tools/run_command_decisions.py)) and
   the repo-wide pytest lint gates (pyflakes, ascii, shebangs, imports).
 - **pip packages** listed in [pip_requirements-dev.txt](../pip_requirements-dev.txt):
   bandit, packaging, pyflakes, pytest, rich
@@ -38,7 +38,7 @@ The binary is at `target/release/claude-code-permissions-hook`.
 3. Create a TOML config file.
    Copy [example.toml](../example.toml) as a starting point and edit
    paths and rules to match your environment.
-   See [docs/CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for rule syntax.
+   See [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for rule syntax.
 
 4. Register the hook in `.claude/settings.json`:
 

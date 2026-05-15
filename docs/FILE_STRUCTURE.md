@@ -30,10 +30,10 @@ claude-code-permissions-hook/
 
 ## Key subtrees
 
-### [src/](../src/)
+### `src/`
 
 Rust source. Each module is documented in
-[docs/CODE_ARCHITECTURE.md](CODE_ARCHITECTURE.md).
+[CODE_ARCHITECTURE.md](CODE_ARCHITECTURE.md).
 
 ```text
 src/
@@ -46,7 +46,7 @@ src/
 `- hook_io.rs                   HookInput / HookOutput / Decision schemas
 ```
 
-### [tests/](../tests/)
+### `tests/`
 
 ```text
 tests/
@@ -75,7 +75,7 @@ tests/
 `- README.md                    Test layout overview
 ```
 
-### [tools/](../tools/)
+### `tools/`
 
 ```text
 tools/
@@ -86,7 +86,7 @@ tools/
 `- test_plan_mode_enforcement.py  Operational check for plan-mode tool gating
 ```
 
-### [docs/](../docs/)
+### `docs/`
 
 ```text
 docs/
@@ -110,7 +110,7 @@ docs/
 
 ## Generated artifacts
 
-- [target/](../target/) -- Cargo build output. Gitignored. Cleanable via
+- `target/` -- Cargo build output. Gitignored. Cleanable via
   `cargo clean` or selectively trimmed by [config_test.sh](../config_test.sh).
 - `/tmp/claude-tool-use.json` -- audit log written by the running hook
   (path configurable via `audit_file` in the TOML).
@@ -121,23 +121,23 @@ docs/
 - Root docs: [README.md](../README.md), [AGENTS.md](../AGENTS.md),
   [CLAUDE.md](../CLAUDE.md), [LICENSE.LGPL_v3](../LICENSE.LGPL_v3),
   [VERSION](../VERSION).
-- All other documentation lives under [docs/](../docs/) using
+- All other documentation lives under `docs/` using
   SCREAMING_SNAKE_CASE filenames per
-  [docs/REPO_STYLE.md](REPO_STYLE.md).
+  [REPO_STYLE.md](REPO_STYLE.md).
 
 ## Where to add new work
 
-- **Rust source**: [src/](../src/). Add a new module by creating
+- **Rust source**: `src/`. Add a new module by creating
   `src/<name>.rs` and declaring `mod <name>;` in
-  [src/lib.rs](../src/lib.rs).
-- **Rust tests**: [tests/](../tests/) for integration tests; inline
-  `#[cfg(test)] mod tests` blocks within [src/](../src/) for unit tests.
+  [lib.rs](../src/lib.rs).
+- **Rust tests**: `tests/` for integration tests; inline
+  `#[cfg(test)] mod tests` blocks within `src/` for unit tests.
 - **Decision-table cases**: append rows to
-  [tests/command_decisions.tsv](../tests/command_decisions.tsv) and run
-  [tools/run_command_decisions.py](../tools/run_command_decisions.py).
-- **Python lint gates**: [tests/](../tests/) with `test_*.py` naming.
-- **Operational scripts**: [tools/](../tools/) -- not under [tests/](../tests/).
-- **Documentation**: [docs/](../docs/) with SCREAMING_SNAKE_CASE
+  [command_decisions.tsv](../tests/command_decisions.tsv) and run
+  [run_command_decisions.py](../tools/run_command_decisions.py).
+- **Python lint gates**: `tests/` with `test_*.py` naming.
+- **Operational scripts**: `tools/` -- not under `tests/`.
+- **Documentation**: `docs/` with SCREAMING_SNAKE_CASE
   filenames; link from [README.md](../README.md) when user-facing.
 
 ## Known gaps
@@ -147,4 +147,4 @@ docs/
   Either rename the file to match the actual license or correct the
   README claim.
 - [ ] [improve_prompt.txt](../improve_prompt.txt) at root -- purpose
-  unclear; consider moving into [devel/](../devel/) or removing.
+  unclear; consider moving into `devel/` or removing.
