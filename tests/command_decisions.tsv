@@ -593,7 +593,7 @@ passthrough	npm test
 # 4-column form: <expected>\t<tool>\t<config>\t<json_input>  -- runs
 #   only against the specified config (path relative to repo root).
 #   Use this for cases that depend on test_config.toml's synthetic
-#   /Users/korny/Dropbox/prj/ allowed-path zone.
+#   /tmp/cck-test/ allowed-path zone.
 # ===================================================================
 
 # --- WebFetch / WebSearch: tool-only allow rules ---
@@ -620,44 +620,83 @@ deny	Read	tests/test_config.toml	{"file_path": "/home/user/../../../etc/shadow"}
 deny	Read	tests/test_config.toml	{"file_path": "../../etc/passwd"}
 deny	Read	tests/test_config.toml	{"file_path": "/tmp/../etc/passwd"}
 
-# --- Read: near-miss sensitive files must NOT be denied ---
+# --- Read: near-miss sensitive files must NOT be denied by .env regex ---
 # .env.* extensions, .environment, .secrets (plural), env w/o dot, etc.
-# These run against test_config.toml since the live/example configs may
-# also have allow rules that would mask the assertion.
-passthrough	Read	tests/test_config.toml	{"file_path": "/home/u/.env.local"}
-passthrough	Read	tests/test_config.toml	{"file_path": "/home/u/.env.production"}
-passthrough	Read	tests/test_config.toml	{"file_path": "/home/u/.environment"}
-passthrough	Read	tests/test_config.toml	{"file_path": "/home/u/.secrets"}
-passthrough	Read	tests/test_config.toml	{"file_path": "/home/u/env"}
-passthrough	Read	tests/test_config.toml	{"file_path": "/home/u/secret_notes.txt"}
+# These files exist under /tmp/cck-nomatch/ (created by setup_test_paths
+# in the runner) so the path-existence pre-check does not fire; the
+# assertion is that the .env-deny regex does not false-positive on them.
+passthrough	Read	tests/test_config.toml	{"file_path": "/tmp/cck-nomatch/.env.local"}
+passthrough	Read	tests/test_config.toml	{"file_path": "/tmp/cck-nomatch/.env.production"}
+passthrough	Read	tests/test_config.toml	{"file_path": "/tmp/cck-nomatch/.environment"}
+passthrough	Read	tests/test_config.toml	{"file_path": "/tmp/cck-nomatch/.secrets"}
+passthrough	Read	tests/test_config.toml	{"file_path": "/tmp/cck-nomatch/env"}
+passthrough	Read	tests/test_config.toml	{"file_path": "/tmp/cck-nomatch/secret_notes.txt"}
 
-# --- Path-zone allow rules (test_config.toml uses /Users/korny/Dropbox/prj/) ---
-allow	Read	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/myproject/README.md"}
-allow	Read	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/test/main.rs"}
-allow	Read	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/deep/nested/path/file.txt"}
-allow	Read	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/test/./safe_file.txt"}
-allow	Write	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/test/output.txt", "content": "x"}
-allow	Write	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/src/new_file.rs", "content": "x"}
-allow	Edit	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/test/main.rs", "old_string": "a", "new_string": "b"}
-allow	Glob	tests/test_config.toml	{"path": "/Users/korny/Dropbox/prj/test", "pattern": "*.rs"}
-allow	Grep	tests/test_config.toml	{"path": "/Users/korny/Dropbox/prj/test", "pattern": "fn main"}
-allow	Glob	tests/test_config.toml	{"path": "/Users/korny/Dropbox/prj/a/b/c/d/e/f", "pattern": "*.txt"}
+# --- Path-zone allow rules (test_config.toml NSH_PATH = ^/tmp/cck-test/) ---
+# All target paths exist on disk so the pre-check passes through to allow.
+allow	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test/myproject/README.md"}
+allow	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test/main.rs"}
+allow	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test/deep/nested/path/file.txt"}
+allow	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test/test_safe_file.txt"}
+allow	Write	tests/test_config.toml	{"file_path": "/tmp/cck-test/output.txt", "content": "x"}
+allow	Write	tests/test_config.toml	{"file_path": "/tmp/cck-test/src/new_file.rs", "content": "x"}
+allow	Edit	tests/test_config.toml	{"file_path": "/tmp/cck-test/main.rs", "old_string": "a", "new_string": "b"}
+allow	Glob	tests/test_config.toml	{"path": "/tmp/cck-test/myproject", "pattern": "*.rs"}
+allow	Grep	tests/test_config.toml	{"path": "/tmp/cck-test/myproject", "pattern": "fn main"}
+allow	Glob	tests/test_config.toml	{"path": "/tmp/cck-test/deep/nested/path", "pattern": "*.txt"}
 
-# --- Path-zone outside allowed dir: passthrough ---
-passthrough	Read	tests/test_config.toml	{"file_path": "/opt/random/file.txt"}
+# --- Path-zone outside allowed dir but path exists: passthrough ---
+# Pre-check passes (path exists), no allow rule matches -> passthrough.
 passthrough	Read	tests/test_config.toml	{"file_path": "/etc/passwd"}
-passthrough	Read	tests/test_config.toml	{"file_path": "/etc/shadow"}
-passthrough	Read	tests/test_config.toml	{"file_path": "/var/log/auth.log"}
-passthrough	Read	tests/test_config.toml	{"file_path": "/root/.ssh/id_rsa"}
-passthrough	Read	tests/test_config.toml	{"file_path": "/proc/self/environ"}
-passthrough	Glob	tests/test_config.toml	{"path": "/etc/secrets", "pattern": "*.conf"}
 passthrough	Glob	tests/test_config.toml	{"path": "/var/log", "pattern": "*.conf"}
 passthrough	Glob	tests/test_config.toml	{"path": "/usr/local/bin", "pattern": "*.conf"}
-passthrough	Grep	tests/test_config.toml	{"path": "/etc/secrets", "pattern": "password"}
 passthrough	Grep	tests/test_config.toml	{"path": "/", "pattern": "password"}
 passthrough	Write	tests/test_config.toml	{"file_path": "/etc/passwd", "content": "x"}
 passthrough	Write	tests/test_config.toml	{"file_path": "/root/.bashrc", "content": "x"}
 passthrough	Edit	tests/test_config.toml	{"file_path": "/etc/hosts", "old_string": "a", "new_string": "b"}
+
+# --- Path-existence pre-check: hallucinated paths deny immediately ---
+# Reproduces the 'agent invents a path that does not exist' failure mode.
+# These rows previously passthrough'd (no rule matched), stalling plans on
+# manual user approval. The pre-check now converts them into immediate
+# denies with tool-specific reasons.
+deny	Read	tests/test_config.toml	{"file_path": "/opt/random/file.txt"}
+deny	Read	tests/test_config.toml	{"file_path": "/etc/shadow"}
+deny	Read	tests/test_config.toml	{"file_path": "/var/log/auth.log"}
+deny	Read	tests/test_config.toml	{"file_path": "/root/.ssh/id_rsa"}
+deny	Read	tests/test_config.toml	{"file_path": "/proc/self/environ"}
+deny	Glob	tests/test_config.toml	{"path": "/etc/secrets", "pattern": "*.conf"}
+deny	Grep	tests/test_config.toml	{"path": "/etc/secrets", "pattern": "password"}
+
+# --- Random unlikely-to-exist paths: deny via pre-check ---
+# Per-tool coverage of clearly-invented paths an agent might hallucinate.
+deny	Read	tests/test_config.toml	{"file_path": "/random/abcdefghij.ext"}
+deny	Read	tests/test_config.toml	{"file_path": "/Users/no_such_user/notes.md"}
+deny	Read	tests/test_config.toml	{"file_path": "/tmp/zzz_made_up_42/file.txt"}
+deny	Read	tests/test_config.toml	{"file_path": "/srv/imaginary/data.csv"}
+deny	Edit	tests/test_config.toml	{"file_path": "/no/such/dir/here/file.py", "old_string": "a", "new_string": "b"}
+deny	Edit	tests/test_config.toml	{"file_path": "/Users/ghost_user/proj/main.py", "old_string": "x", "new_string": "y"}
+deny	Glob	tests/test_config.toml	{"path": "/var/imaginary_dir", "pattern": "*.py"}
+deny	Glob	tests/test_config.toml	{"path": "/Users/fake/repo", "pattern": "**/*.ts"}
+deny	Grep	tests/test_config.toml	{"path": "/opt/never_existed", "pattern": "TODO"}
+deny	Grep	tests/test_config.toml	{"path": "/home/nonexistent_user/src", "pattern": "FIXME"}
+
+# --- Path-existence pre-check: Edit allows new files in existing dirs ---
+# Edit accepts a missing file_path if the parent directory exists.
+# /tmp/cck-test/ exists; file_path target does not.
+passthrough	Edit	tests/test_config.toml	{"file_path": "/tmp/cck-nomatch/_new_file.txt", "old_string": "a", "new_string": "b"}
+allow	Edit	tests/test_config.toml	{"file_path": "/tmp/cck-test/_new_file.txt", "old_string": "a", "new_string": "b"}
+
+# --- Path-existence pre-check: Read denies a directory passed as file_path ---
+deny	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test/myproject"}
+deny	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test"}
+
+# --- Path-existence pre-check: Glob denies a file passed where dir expected ---
+deny	Glob	tests/test_config.toml	{"path": "/tmp/cck-test/main.rs", "pattern": "*.rs"}
+
+# --- Write stays exempt from pre-check (creates new files by design) ---
+passthrough	Write	tests/test_config.toml	{"file_path": "/tmp/cck-nomatch/never_existed_yet.txt", "content": "x"}
+passthrough	Write	tests/test_config.toml	{"file_path": "/random/abcdefghij.new", "content": "x"}
 
 # --- Empty / minimal tool inputs: passthrough ---
 passthrough	Bash	{"command": ""}
@@ -674,11 +713,11 @@ passthrough	MadeUpTool	{"some_param": "x"}
 
 # --- Deny priority: deny rule wins over allow rule on same input ---
 # Sensitive file inside an otherwise-allowed path.
-deny	Read	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/production/.env"}
+deny	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test/production/.env"}
 # Path traversal inside an otherwise-allowed path.
-deny	Read	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/../other/secret.txt"}
-deny	Read	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/../../../etc/passwd"}
-deny	Read	tests/test_config.toml	{"file_path": "/Users/korny/Dropbox/prj/test/../../outside"}
+deny	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test/../other/secret.txt"}
+deny	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test/../../../etc/passwd"}
+deny	Read	tests/test_config.toml	{"file_path": "/tmp/cck-test/test/../../outside"}
 
 # --- node allow: local script execution + known dev/test flags (2026-05-13) ---
 # Path-trailing forms with whitelisted flags auto-allow. Inline JS (-e/--eval)

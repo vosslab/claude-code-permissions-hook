@@ -184,8 +184,52 @@ def run_row(row: dict, filter_str: str) -> tuple:
 
 
 #============================================
+def setup_test_paths() -> None:
+	"""Materialize the /tmp/cck-test/ tree referenced by TSV fixtures.
+
+	The path-existence pre-check denies Read/Edit/Glob/Grep against missing
+	paths, so TSV rows that expect 'allow' or 'passthrough' must reference
+	files that exist. Idempotent: re-running is a no-op.
+	"""
+	# Directory layout used across TSV rows under tests/test_config.toml.
+	# /tmp/cck-test/ is inside the NSH_PATH allow zone.
+	# /tmp/cck-nomatch/ stays outside the allow zone so near-miss tests
+	# (passthrough rows that verify deny regexes do not false-positive)
+	# work without being captured by the broad path allow.
+	root = "/tmp/cck-test"  # nosec B108 -- intentional /tmp fixture root for TSV runner
+	nomatch = "/tmp/cck-nomatch"  # nosec B108 -- intentional /tmp non-allow-zone fixture root
+	dirs = [
+		root,
+		os.path.join(root, "myproject"),
+		os.path.join(root, "deep", "nested", "path"),
+		os.path.join(root, "src"),
+		nomatch,
+	]
+	for d in dirs:
+		os.makedirs(d, exist_ok=True)
+	# Files used by 'allow' Read/Edit/Grep rows and dotfile-near-miss rows.
+	files = [
+		os.path.join(root, "main.rs"),
+		os.path.join(root, "test_safe_file.txt"),
+		os.path.join(root, "myproject", "README.md"),
+		os.path.join(root, "deep", "nested", "path", "file.txt"),
+		os.path.join(nomatch, ".env.local"),
+		os.path.join(nomatch, ".env.production"),
+		os.path.join(nomatch, ".environment"),
+		os.path.join(nomatch, ".secrets"),
+		os.path.join(nomatch, "env"),
+		os.path.join(nomatch, "secret_notes.txt"),
+	]
+	for f in files:
+		if not os.path.exists(f):
+			# touch
+			open(f, "a").close()
+
+
+#============================================
 def main() -> int:
 	"""Entry point."""
+	setup_test_paths()
 	# Preflight checks.
 	if not os.access(HOOK, os.X_OK):
 		print(f"FAIL: hook binary missing or not executable; "

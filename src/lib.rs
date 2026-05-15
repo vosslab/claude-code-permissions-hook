@@ -14,6 +14,7 @@ pub mod config;
 pub mod decomposer;
 pub mod hook_io;
 pub mod matcher;
+pub mod path_check;
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -139,7 +140,12 @@ fn process_hook_input_with_rules_and_context(
         }
     }
 
-    // Non-Bash tools: original logic
+    // Non-Bash tools: hardcoded path-existence pre-check first, then rules.
+    // Catches hallucinated Read/Edit/Glob/Grep paths that would otherwise
+    // stall as passthrough waiting for user approval.
+    if let Some(reason) = path_check::check_path_exists(input) {
+        return HookResult::deny(reason);
+    }
     if let Some(reason) = check_rules_with_protected_branches(deny_rules, input, protected_branches) {
         return HookResult::deny(reason);
     }

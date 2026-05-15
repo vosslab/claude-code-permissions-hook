@@ -13,8 +13,8 @@ SYS_CMDS = "date|done|du|echo|env|export|expr|false|for|id|nproc|numfmt|printenv
 SAFE_CMDS = "${FILE_CMDS}|${FS_CMDS}|${SYS_CMDS}"
 NO_CMD_SUB = "`|\\$\\("
 
-NSH_PATH = "^/Users/korny/Dropbox/prj/"
-CLAUDE_PATH = "^/Users/korny/\\.claude/"
+NSH_PATH = "^/tmp/cck-test/"
+CLAUDE_PATH = "^/tmp/cck-test/\\.claude/"
 
 # Deny rules - checked first (take precedence)
 
@@ -109,30 +109,30 @@ reason = "Do not use /opt/homebrew/bin/python3 -c with inline code. Write a .py 
 # Allow reads within the Dropbox project directory
 [[allow]]
 tool = "Read"
-file_path_regex = "^/Users/korny/Dropbox/prj/.*"
+file_path_regex = "${NSH_PATH}.*"
 file_path_exclude_regex = "\\.\\."
 
 # Allow writes within the Dropbox project directory
 [[allow]]
 tool = "Write"
-file_path_regex = "^/Users/korny/Dropbox/prj/.*"
+file_path_regex = "${NSH_PATH}.*"
 file_path_exclude_regex = "\\.\\."
 
 # Allow edits within the Dropbox project directory
 [[allow]]
 tool = "Edit"
-file_path_regex = "^/Users/korny/Dropbox/prj/.*"
+file_path_regex = "${NSH_PATH}.*"
 file_path_exclude_regex = "\\.\\."
 
 # Allow Glob within the Dropbox project directory
 [[allow]]
 tool = "Glob"
-file_path_regex = "^/Users/korny/Dropbox/prj/"
+file_path_regex = "${NSH_PATH}"
 
 # Allow Grep within the Dropbox project directory
 [[allow]]
 tool = "Grep"
-file_path_regex = "^/Users/korny/Dropbox/prj/"
+file_path_regex = "${NSH_PATH}"
 
 # Allow homebrew python running .py files directly (but not -c)
 [[allow]]

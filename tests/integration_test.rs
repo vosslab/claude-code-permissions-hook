@@ -4,10 +4,27 @@
 //! logic without spawning a subprocess.
 
 use std::path::PathBuf;
+use std::sync::Once;
 
 use claude_code_permissions_hook::{
     Decision, HookInput, HookResult, process_hook_input, validate_config,
 };
+
+/// Materialize the `/tmp/cck-test/` tree referenced by checked-in fixtures.
+///
+/// The path-existence pre-check denies Read/Edit/Glob/Grep calls whose target
+/// is missing, so fixtures cannot reference paths that do not exist on disk.
+/// Runs exactly once per test process via `Once`.
+static SETUP_TEST_PATHS: Once = Once::new();
+
+fn ensure_test_paths() {
+    SETUP_TEST_PATHS.call_once(|| {
+        let root = std::path::Path::new("/tmp/cck-test");
+        std::fs::create_dir_all(root.join("myproject")).expect("create cck-test root");
+        std::fs::write(root.join("main.rs"), b"// test file\n").expect("write main.rs");
+        std::fs::write(root.join("myproject/README.md"), b"# test\n").expect("write README.md");
+    });
+}
 
 /// Helper to get the path to the test config
 fn config_path() -> PathBuf {
@@ -28,6 +45,7 @@ fn example_config_path() -> PathBuf {
 fn test_json_path(name: &str) -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests");
+    path.push("fixtures");
     path.push(name);
     path
 }
@@ -42,6 +60,7 @@ fn load_test_input(filename: &str) -> HookInput {
 
 #[test]
 fn test_read_allowed() {
+    ensure_test_paths();
     let input = load_test_input("read_allowed.json");
     let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
 
@@ -58,6 +77,7 @@ fn test_read_allowed() {
 
 #[test]
 fn test_read_path_traversal_denied() {
+    ensure_test_paths();
     let input = load_test_input("read_path_traversal.json");
     let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
 
@@ -327,6 +347,7 @@ fn test_webfetch_tool_only_allowed() {
 
 #[test]
 fn test_glob_allowed_path() {
+    ensure_test_paths();
     let input = load_test_input("glob_allowed.json");
     let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
 
@@ -348,6 +369,7 @@ fn test_glob_allowed_path() {
 
 #[test]
 fn test_grep_allowed_path() {
+    ensure_test_paths();
     let input = load_test_input("grep_allowed.json");
     let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
 
@@ -369,6 +391,7 @@ fn test_grep_allowed_path() {
 
 #[test]
 fn test_edit_allowed_path() {
+    ensure_test_paths();
     let input = load_test_input("edit_allowed.json");
     let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
 

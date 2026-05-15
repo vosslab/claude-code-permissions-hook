@@ -747,6 +747,64 @@ version-suffixed `python3.12 -c`, absolute-path binaries
 flags before `-c` (`python3 -B -c`). `python3 script.py` and `python3 -m pytest`
 are unaffected -- only the `-c` inline-code form is denied.
 
+## Path existence pre-check
+
+Before evaluating any allow or deny rule, the hook stats the target path of
+`Read`, `Edit`, `MultiEdit`, `Glob`, and `Grep` calls and denies the call
+outright when the path is missing or unusable for the tool. This catches the
+common "hallucinated path" failure mode where an agent invents a file path
+that does not exist on disk.
+
+Without the pre-check, an invented path either matched an allow zone regex
+and was allowed (then failed at execution with a file-not-found error,
+wasting a turn) or matched no rule and routed to passthrough (stalling the
+plan until the user manually denied). With the pre-check, the agent sees an
+immediate deny with a tool-specific reason that names the missing path.
+
+### Per-tool semantics
+
+| Tool | Requirement | Failure modes |
+| --- | --- | --- |
+| `Read` | `file_path` resolves to an existing, non-directory target | missing path; path is a directory; broken symlink |
+| `Edit` / `MultiEdit` | `file_path` exists, OR its parent directory exists | both file and parent missing |
+| `Glob` | resolved `path` is an existing directory | missing path; file passed where directory expected |
+| `Grep` | resolved `path` (when provided) exists as file or directory | missing path |
+| `Write` | exempt | n/a -- Write creates new files by design |
+
+Symlinks-to-existing-files are accepted for `Read`. Broken symlinks deny
+because `fs::metadata` follows the link and reports the missing target.
+Relative paths are resolved against the hook input's `cwd`. When `Glob` or
+`Grep` is called without a `path` field, the pre-check is skipped (the
+cwd fallback is trusted).
+
+### Reason strings the agent sees
+
+| Condition | Reason |
+| --- | --- |
+| Read target missing | `Verify the file path before retrying. Read target does not exist: <path>.` |
+| Read target is a directory | `Read targets a file, not a directory. Use the Glob tool to list directory contents. Path is a directory: <path>.` |
+| Edit / MultiEdit both missing | `Create the parent directory first or choose an existing path. Edit target and parent directory are both missing: <path>; parent: <parent>.` |
+| Glob path missing or not a directory | `Choose an existing search directory before retrying. Glob path does not exist as a directory: <path>.` |
+| Grep path missing | `Choose an existing file or directory before retrying. Grep path does not exist: <path>.` |
+| Stat failed for any reason other than NotFound (permissions, etc.) | `Verify the path before retrying. The hook could not confirm that this path exists: <path>.` |
+
+The pre-check distinguishes `Ok(false)` (path confirmed missing) from
+`Err(_)` (could not stat -- permission denied on a parent directory,
+malformed path, etc.). Only confirmed-missing emits "does not exist";
+errors emit "could not confirm" so the message stays accurate.
+
+### What to do when you see one of these reasons
+
+- Verify the path before retrying. The hook printed exactly which path it
+  could not find and, for Edit, which parent directory was also missing.
+- If the path was a typo, fix it. If the path belongs to a different
+  working directory, set `cwd` correctly or use an absolute path.
+- For Read of a directory, switch to the Glob tool. For Glob with a file
+  argument, switch to Grep or Read.
+- For a brand-new file you intend to create, prefer `Write`; the pre-check
+  is exempt for `Write`. `Edit` of a brand-new file is also accepted as long
+  as the parent directory already exists.
+
 ## Worktrees and protected branches
 
 Agents work on `agent/<task>` branches (often inside a worktree) and prepare

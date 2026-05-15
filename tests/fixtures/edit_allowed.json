@@ -1,11 +1,11 @@
 {
   "session_id": "test-session-209",
   "transcript_path": "/tmp/transcript.jsonl",
-  "cwd": "/Users/korny/Dropbox/prj/test",
+  "cwd": "/tmp/cck-test",
   "hook_event_name": "PreToolUse",
   "tool_name": "Edit",
   "tool_input": {
-    "file_path": "/Users/korny/Dropbox/prj/test/main.rs",
+    "file_path": "/tmp/cck-test/main.rs",
     "old_string": "fn old()",
     "new_string": "fn new()"
   }
