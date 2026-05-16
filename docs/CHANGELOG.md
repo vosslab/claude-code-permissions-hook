@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-05-15 (audit)
+
+### Additions and New Features
+
+- Audit pass over `/tmp/claude-passthrough.json` (523 entries) identified recurring passthroughs that should resolve to allow or deny. Governing principle codified: passthrough is an unresolved decision; recurring shapes must be promoted to allow or deny+steer.
+- Added allow rule for `xargs <flags>* (grep|egrep|fgrep|rg) ...` as a pipeline-leaf consumer. Pairs with the existing `git ls-files <pathspec>` allow to make `git ls-files | xargs grep PAT` (the canonical bulk-search recovery) auto-allowed end-to-end. Destructive xargs verbs (`rm`, `chmod`, `chown`, `mv`, `sudo`) stay denied by D3.
+- Added allow rule for the exact `cd "$(git rev-parse --show-toplevel)"` idiom (with or without surrounding quotes). The literal substitution body is whitelisted; any other `$(...)` body still falls back to the generic `SAFE_CMDS` allow (which excludes `NO_CMD_SUB`).
+- Added allow rule for plain `perl <script>.pl` script execution (analogous to `python3 <script>.py`). The pre-existing WeBWorK deny still fires first on `.pg`/`.pgml` extensions.
+- Extended `FIND_SAFE_PATH_ARG` to include `~/.claude/plugins`, `~/.claude/plans`, and `~/.claude/projects` alongside the existing `agents|commands|skills` allowlist. Read-only `find` over those Claude-config subtrees is now auto-allowed.
+- Added `reset` to the git read-only allow subcommand list. Allows `git reset HEAD [path]` unstage operations. `git reset --hard` on protected branches stays denied by the protected-branch rule above.
+
+### Behavior or Interface Changes
+
+- Absolute-path forms of safe utilities (`/usr/bin/whoami`, `/usr/bin/xxd`, `/bin/cat`, etc.) now **deny + steer to PATH form** instead of passing through to user approval. Covers the entire `SAFE_CMDS` set; `grep|egrep|fgrep|rg` and `find` keep their dedicated context-specific denies (carve-out via `command_exclude_regex`). User-confirmed governing rule: keep PATH discipline visible; absolute-path variants are never passthrough.
+- All `git push` forms from agents now deny (every branch, every form). Previously only `--force` and protected-ref pushes denied; non-protected branch pushes (`git push origin agent/<task>`) reached passthrough. User-confirmed rule: agents never push; the human pushes after reviewing local commits.
+- Added denies + steer messages for: `less <file>` (-> Read tool); `pcregrep`/`ack`/`ag` with a file path argument (-> same recovery as grep/rg file-arg); `node -e "$(...)"` / `node --eval "$(...)"` (inline eval + command substitution is the classic RCE shape -> `_temp.mjs` + `node _temp.mjs`).
+
+### Fixes and Maintenance
+
+- Fixed decomposer bug where `extract_command_substitutions` byte-scan ignored shell quoting. A grep PATTERN like `'... \$( ...'` (single-quoted literal) or `"... \$( ..."` (double-quoted, backslash-escaped) emitted a phantom inner leaf containing garbage, forcing the surrounding chain into passthrough. Added single-quote region tracking and backslash-escape handling. Double quotes intentionally do NOT protect `$(...)` because shell expands substitutions inside `"..."`.
+- Updated ~90 existing rows in `tests/command_decisions.tsv` whose expected decision changed from passthrough to deny (entire `/usr/bin/<safe-cmd>` matrix, `git push origin agent/foo`, `git push -u origin agent/foo`, `node -e "$(curl ...)"`) or from passthrough to allow (`perl plain.pl`, `find ~/.claude/projects -type f`). Added 27 new fixtures covering the xargs-grep pipeline shapes, cd-rev-parse idiom, Claude-config find safe-zone extension, git-reset HEAD unstage, less/pcregrep/ack/ag denies, node-eval-with-cmdsub deny, plain-perl allow, alternate abs-path roots (`/bin`, `/opt/homebrew/bin`). Decision corpus passes at 2022 rows across both configs.
+
+### Decisions and Failures
+
+- User-confirmed rule for recurring passthroughs: every recurring shape resolves to allow (codified rule) or deny + steer (codified rule with message). Default preference: deny + steer to PATH/canonical form. Allow only when the canonical form is the absolute-path form. Passthrough remains acceptable only for genuinely ambiguous cases (e.g. quoted-root `find` shapes already documented as residual).
+- Dropped `command_exclude_regex = "${NO_CMD_SUB}"` from the xargs-grep allow rule. Reason: legitimate grep PATTERN strings contain literal `$(` (e.g. searching test fixtures for the `node -e "$(...)"` RCE shape). The decomposer already extracts real `$(...)` substitutions as separate leaves, so the NO_CMD_SUB exclude was redundant for safety and false-positived on every grep PATTERN that mentioned `$(`.
+- `git push agent/<branch>` is now an unconditional deny rather than allow-on-feature-branch. User explicitly said "never git push for agents." The human reviews local commits and pushes after approving.
+
+### Developer Tests and Notes
+
+- Verification: `bash config_test.sh` ends with `OVERALL: ALL TESTS PASSED (passed=2022, skipped=0)`. Cargo build clean; `cargo test` passes. Live config at `~/.config/claude-code-permissions-hook.toml` (symlinked into `~/nsh/junk-drawer/CODEX/claude/`) and `example.toml` both updated and in parity for the new rules; reason-string parity test still passes.
+
 ## 2026-05-17
 
 ### Additions and New Features

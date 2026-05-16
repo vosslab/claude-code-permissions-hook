@@ -179,15 +179,43 @@ fn strip_outer_quotes(s: &str) -> String {
 
 /// Extract inner command strings from `$(...)` command substitutions.
 ///
-/// Uses parenthesis-depth tracking to handle nested `$(...)`.
-/// Returns one string per top-level `$(...)` found.
+/// Uses parenthesis-depth tracking to handle nested `$(...)`. Skips
+/// `$(...)` occurrences inside single-quoted regions (literal) and
+/// occurrences preceded by an unescaped backslash. Double quotes do
+/// not protect `$(...)` (shell expands substitutions inside `"..."`).
+///
+/// Without this guard, grep PATTERN strings like `'... \$( ...'` or
+/// `"... \$( ..."` were extracted as phantom leaves and forced the
+/// surrounding chain into passthrough (passthrough audit 2026-05-15).
 fn extract_command_substitutions(s: &str) -> Vec<String> {
     let mut results = Vec::new();
     let bytes = s.as_bytes();
     let mut i = 0;
+    let mut in_single = false;
     while i < bytes.len().saturating_sub(1) {
+        let c = bytes[i];
+        // Single-quoted regions are literal: only a closing `'` ends them.
+        if in_single {
+            if c == b'\'' {
+                in_single = false;
+            }
+            i += 1;
+            continue;
+        }
+        // Backslash escapes the next byte (whether inside or outside "...").
+        if c == b'\\' {
+            i += 2;
+            continue;
+        }
+        // Open a single-quoted region. We do NOT track double quotes
+        // because `$(...)` IS active inside double quotes.
+        if c == b'\'' {
+            in_single = true;
+            i += 1;
+            continue;
+        }
         // Look for $( pattern
-        if bytes[i] == b'$' && bytes[i + 1] == b'(' {
+        if c == b'$' && bytes[i + 1] == b'(' {
             // Track paren depth starting after $(
             let start = i + 2;
             let mut depth = 1;

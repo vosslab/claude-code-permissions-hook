@@ -118,7 +118,7 @@ WORKSPACE_ROOT = "projects"
 #   - any path containing shell glob chars (*, ?, [) in any segment
 # Note: `..` path traversal is excluded by D5 deny and by A1's
 # command_exclude_regex (${NO_TRAVERSAL}), not by this pattern.
-FIND_SAFE_PATH_ARG = "(?:\\.(?:/[A-Za-z0-9_./-]+)?|~/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|/(?:private/)?tmp(?:/[A-Za-z0-9_./-]+)?|/Users/[^/\\s]+/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|[$]HOME/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills)(?:/[A-Za-z0-9_./-]+)?|[A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_./-]+)?)"
+FIND_SAFE_PATH_ARG = "(?:\\.(?:/[A-Za-z0-9_./-]+)?|~/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|/(?:private/)?tmp(?:/[A-Za-z0-9_./-]+)?|/Users/[^/\\s]+/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|[$]HOME/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills|plugins|plans|projects)(?:/[A-Za-z0-9_./-]+)?|[A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_./-]+)?)"
 
 # ===================================================================
 # DENY rules (checked first, before allow rules)
@@ -214,6 +214,15 @@ reason = "Use `git checkout -- path/to/file` to discard a single file. Use `git 
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}push\\b.*(-f\\b|--force\\b|--force-with-lease\\b)"
 reason = "Ask the user to run the force push manually so they can verify the target branch. Force push is rejected from agents because it destroys remote history."
+
+# Deny ALL git push from agents on every branch and every form.
+# Passthrough audit (2026-05-15) showed `git push origin agent/<task>`
+# reaching user approval each time. User-confirmed rule: agents never
+# push; the human pushes after reviewing merged work locally.
+[[deny]]
+tool = "Bash"
+command_regex = ".*${GIT_INVOCATION}push\\b"
+reason = "Ask the user to push manually. `git push` is rejected from agents on every branch (not just protected); the human reviews local commits and pushes after approving the merge."
 
 # --- Protected branch enforcement ---
 # These rules deny operations that would advance protected branch tips.
@@ -576,6 +585,19 @@ tool = "Bash"
 command_regex = "^${TOOL_PREFIX}/(?:[^/\\s]+/)+(grep|egrep|fgrep|rg)\\b"
 reason = "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `grep` and `rg` are good tools and stay allowed as pipeline filters on already-bounded output (`git ls-files | grep pat`, `git ls-files | rg pat`, `git diff | grep pat`). For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `grep`, `egrep`, `fgrep`, `rg`, and absolute-path forms (`/usr/bin/grep`, `/opt/homebrew/.../grep`) are denied only with a file path argument -- scope-control rule, not anti-grep."
 
+# Deny absolute-path forms of safe utilities. Steer to bare PATH form.
+# Passthrough audit (2026-05-15) showed /usr/bin/<tool> variants falling
+# through to user approval for the entire safe-utility list. Governing
+# rule: passthrough is an unresolved decision; absolute-path variants are
+# resolved as deny + steer to PATH. The grep/find absolute-path denies
+# above already cover those tools (which have their own context-specific
+# steer messages); this rule covers every OTHER safe utility.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}/(?:[^/\\s]+/)+(${SAFE_CMDS})\\b"
+command_exclude_regex = "/(?:[^/\\s]+/)+(grep|egrep|fgrep|rg|find)\\b"
+reason = "Use the bare PATH form (e.g. `whoami`, `xxd`, `cat ...`) rather than the absolute path (`/usr/bin/whoami`, `/usr/bin/xxd`, `/bin/cat`). Absolute-path forms of safe utilities are rejected to keep PATH discipline visible and to avoid bypass shapes."
+
 # Deny sed -n for line extraction when reading a file (path-shaped argument).
 # Pipeline leaves like '... | sed -n 250,400p' (no file, paginating stdin) are
 # NOT matched and remain allowed -- Read can't substitute for stdout pagination.
@@ -609,6 +631,28 @@ tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(bash|sh|zsh)\\s+-n\\b"
 reason = "Inspect the script with the Read tool. To execute, use `bash script.sh` or ask for user approval. `bash`/`sh`/`zsh -n` syntax-check is rejected; the shell is not the right tool for script analysis."
 
+# Deny `less <file>` -- it is `cat`-with-pager and should route through Read.
+# The pipeline form (`... | less`) does not match (no path arg).
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}less\\b[^>]*/"
+reason = "Invoke the Read tool: file_path=<path>, with optional offset and limit. `less <file>` is rejected because Read provides line numbers and bounded slicing; the pipeline form `... | less` is not the same shape and is not auto-allowed either."
+
+# Deny pcregrep/ack/ag with a file path argument -- mirrors the grep/rg
+# file-arg deny so agents do not switch grep variants to bypass scope control.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(pcregrep|ack|ag)\\b[^>]*/"
+reason = "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed."
+
+# Deny `node -e "$(...)"` / `node --eval "$(...)"` -- inline eval combined
+# with command substitution is the classic RCE shape. Plain `node -e "..."`
+# stays as passthrough (handled by the node allow rule's lack of -e match).
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}node\\s+(-e|--eval)\\b[^|;&]*\\$\\("
+reason = "Write the JS to a `_temp.mjs` file and run `node _temp.mjs`. `node -e \"$(...)\"` / `node --eval \"$(...)\"` is rejected because inline eval combined with command substitution is the classic RCE shape."
+
 # --- WeBWorK steering ---
 
 # Deny perl on WeBWorK PG/PGML files -- PGML is not standard Perl
@@ -616,6 +660,14 @@ reason = "Inspect the script with the Read tool. To execute, use `bash script.sh
 tool = "Bash"
 command_regex = "^perl\\b.*\\.pg(ml)?\\b"
 reason = "Use the `/webwork-writer` skill lint guide to validate WeBWorK problems. Running `perl` on .pg/.pgml files is rejected because PGML is not standard Perl."
+
+# Allow plain `perl <script>.pl` script execution. Analogous to
+# `python3 <script>.py`. The WeBWorK deny above still fires first on
+# `.pg`/`.pgml` extensions (steered to /webwork-writer skill).
+[[allow]]
+tool = "Bash"
+command_regex = "^perl\\s+[A-Za-z0-9_./-]+\\.pl(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
 
 # --- TypeScript steering ---
 
@@ -893,7 +945,7 @@ command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CM
 
 [[allow]]
 tool = "Bash"
-command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|cat-file|check-ignore|checkout|diff|fsck|ls-files|ls-tree|log|mv|pull|reflog|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
+command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|cat-file|check-ignore|checkout|diff|fsck|ls-files|ls-tree|log|mv|pull|reflog|remote|reset|restore|rev-parse|show|status|worktree)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
@@ -965,6 +1017,32 @@ command_exclude_regex = "${NO_CMD_SUB}"
 # Env-var prefixes are stripped by the decomposer, so no separate
 # env-prefixed rule is needed.
 # -------------------------------------------------------------------
+
+# Allow `cd "$(git rev-parse --show-toplevel)"` -- specific exemption.
+# Passthrough audit (2026-05-15): this idiom appears frequently in agent
+# chains and is benign (resolves to the repo root). The substitution body
+# is whitelisted literally; any other `$(...)` body still fails this
+# allow and falls back to the generic SAFE_CMDS rule (which excludes
+# NO_CMD_SUB).
+[[allow]]
+tool = "Bash"
+command_regex = "^cd\\s+[\"']?\\$\\(\\s*git\\s+rev-parse\\s+--show-toplevel\\s*\\)[\"']?\\s*$"
+
+# Allow `xargs <flags>* (grep|egrep|fgrep|rg) ...` as a pipeline leaf.
+# Passthrough audit (2026-05-15): `git ls-files <pathspec> | xargs grep
+# PAT` is the canonical bulk-search pattern and was hitting passthrough
+# because xargs reads its argv from stdin (no path arg visible). When
+# this leaf is reached via pipe, the upstream leaf has already been
+# evaluated against allow/deny rules, so this allow only completes the
+# decision for the consumer half. Destructive xargs verbs (rm/chmod/
+# chown/mv/sudo) stay denied by D3 above. NO_CMD_SUB is intentionally
+# NOT applied: grep PATTERNs commonly contain literal `$(` (e.g.
+# searching for a `node -e "$(...)"` shape inside test fixtures); the
+# decomposer already extracts real `$(...)` substitutions as separate
+# leaves and evaluates them on their own.
+[[allow]]
+tool = "Bash"
+command_regex = "^xargs\\b(\\s+-[A-Za-z0-9]+(\\s+\\S+)?)*\\s+(grep|egrep|fgrep|rg)\\b"
 
 [[allow]]
 tool = "Bash"
