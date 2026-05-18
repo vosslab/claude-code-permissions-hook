@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-05-18 (audit)
+
+### Behavior or Interface Changes
+
+- Deny `node -e` / `node --eval` outright; mirrors the existing `python -c` deny. Steers to `_temp.mjs` + `node _temp.mjs`. Previously only the command-substitution shape `node -e "$(...)"` was denied; plain inline JS reached passthrough and was stalling manager agents (96 fixture + 13 real entries in `/tmp/claude-passthrough.json`, the largest single Bash-passthrough source).
+- Deny `printf` used as a Write-tool replacement: `printf '...' > FILE`, `printf '...' >> FILE`, `printf '...' | tee FILE`, `printf '...' | tee -a FILE`. Steers to the Write tool (or Edit for appends). Bare `printf '...'` for stdout formatting stays allowed via SYS_CMDS. Triggered by 53 passthrough entries assembling large markdown/code blobs.
+
+### Fixes and Maintenance
+
+- `tests/command_decisions.tsv`: flipped 4 `node -e` / `--eval` rows from `passthrough` to `deny`; added 8 new node fixtures (absolute-path forms, `command`/`env` prefixes, `-B -e` interpreter-flag form, allow `node _temp.mjs`) and 6 new printf fixtures (4 deny, 2 allow). Decision corpus passes at 2044 rows across both configs.
+
+### Decisions and Failures
+
+- Confirmed `SendUserFile`, `PushNotification`, `LSP` stay as passthrough by design; downstream (Claude Code UI / user prompt) handles consent. Do not add auto-allow rules for these tools.
+
 ## 2026-05-15 (audit)
 
 ### Additions and New Features

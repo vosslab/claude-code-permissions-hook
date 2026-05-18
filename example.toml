@@ -645,13 +645,25 @@ tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(pcregrep|ack|ag)\\b[^>]*/"
 reason = "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed."
 
-# Deny `node -e "$(...)"` / `node --eval "$(...)"` -- inline eval combined
-# with command substitution is the classic RCE shape. Plain `node -e "..."`
-# stays as passthrough (handled by the node allow rule's lack of -e match).
+# Deny `node -e` / `node --eval` inline JS. Same risk profile as
+# `python -c`: arbitrary inline code, hard to lint/audit, can hide
+# command substitution and child_process calls. Steered to `_temp.mjs`.
+# The `(-\S+\s+)*` clause allows interpreter flags before `-e`/`--eval`
+# (matches the python -c rule shape).
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}node\\s+(-e|--eval)\\b[^|;&]*\\$\\("
-reason = "Write the JS to a `_temp.mjs` file and run `node _temp.mjs`. `node -e \"$(...)\"` / `node --eval \"$(...)\"` is rejected because inline eval combined with command substitution is the classic RCE shape."
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}node\\s+(-\\S+\\s+)*(-e|--eval)\\b"
+reason = "Write the JS to a `_temp.mjs` file and run `node _temp.mjs`. `node -e` / `node --eval` with inline code is rejected because it is hard to lint and debug, and can hide command substitution or child_process calls. Same rule shape as `python -c`."
+
+# Deny `printf` used as a Write-tool replacement: redirected to a file
+# (`>`, `>>`) or piped to `tee`. Steers to the Write tool (or Edit for
+# appends). Bare `printf '...'` for stdout formatting stays allowed via
+# SYS_CMDS. 2026-05-18 audit: 53 passthrough entries were `printf ...
+# > FILE` / `>> FILE` / `| tee FILE` writing large markdown/code blobs.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}printf\\b[^|;&]*(?:>>?\\s*\\S|\\|\\s*tee\\b)"
+reason = "Use the Write tool for new files or the Edit tool for appends. `printf ... > FILE`, `printf ... >> FILE`, and `printf ... | tee FILE` are rejected because they bypass the Write/Edit tools that provide diffs, line counts, and proper change tracking."
 
 # --- WeBWorK steering ---
 
