@@ -1,5 +1,13 @@
 # Claude hook usage guide
 
+_Last updated: 2026-05-21 19:06 UTC. Source of truth: `claude-code-permissions-hook`
+repo. Mirrors in sibling repos (e.g. `starter-repo-template`) are copies; do not
+edit mirrors directly._
+
+Timestamp format: `YYYY-MM-DD HH:MM UTC` (ISO 8601 date + 24-hour clock, UTC).
+Regenerate on every audit; derive from the latest `## YYYY-MM-DD` heading in
+`docs/CHANGELOG.md` plus current commit time.
+
 Best practices for AI agents working in repos that use the `claude-code-permissions-hook`.
 This guide covers what commands are allowed, denied, and passed through, along with
 preferred alternatives for denied patterns.

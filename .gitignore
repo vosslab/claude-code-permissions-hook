@@ -1,7 +1,11 @@
 claude-code-permissions-hook.toml
 report*.txt
 .DS_Store
-#build folder
-target/
-report_*.txt
-_*.py
+# === UNIVERSAL ===
+_temp*.?*
+# === RUST ===
+/target/
+**/target/
+**/*.rs.bk
+.rust_analyzer/
+

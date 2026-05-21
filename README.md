@@ -1,51 +1,22 @@
-# Claude Code permissions hook
+# claude-code-permissions-hook
 
-A PreToolUse hook for [Claude Code](https://docs.claude.com/en/docs/claude-code)
-that provides granular allow/deny control over tool use. Configure rules in a
-single TOML file with regex pattern matching, reusable variables, and audit
-logging. A built-in shell command decomposer splits compound Bash commands and
-unwraps `bash -c "..."` wrappers so each leaf sub-command is checked independently.
-
-Deny rules are checked first, then allow rules. No match falls through to the
-normal Claude Code permission prompt. See [docs/INSTALL.md](docs/INSTALL.md) for
-build steps and hook registration.
+Rust permission hook for Claude Code that intercepts every tool call, decomposes compound shell commands, and decides allow, deny, or passthrough against TOML rules to bound blast radius while keeping routine local work unblocked.
 
 ## Quick start
 
-Build the binary and validate your config:
-
-    cargo build --release
-    ./target/release/claude-code-permissions-hook validate --config example.toml
-
-Register the hook by pointing a `PreToolUse` entry in `.claude/settings.json` at
-the binary with `--config /path/to/config.toml`. See [docs/INSTALL.md](docs/INSTALL.md)
-for the full settings block.
+1. Build the binary: `cargo build --release`. The hook reads JSON input on stdin and writes a JSON decision on stdout, suitable for wiring into Claude Code's PreToolUse hook.
+2. Copy `example.toml` to a personal config location and tailor it to your workspace; the example file is the canonical rule set.
+3. Validate any config edit before use: `cargo run --release --bin claude-code-permissions-hook -- validate --config /path/to/your.toml` prints the loaded rule count.
+4. Exercise the rule corpus: `python3 tools/run_command_decisions.py` runs `tests/command_decisions.tsv` against both the example and live configs.
 
 ## Documentation
 
-- [docs/INSTALL.md](docs/INSTALL.md): requirements, build steps, hook registration
-- [docs/USAGE.md](docs/USAGE.md): CLI reference, input/output format, examples
-- [docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md): rule syntax for each tool
-- [docs/TOOL_INPUT_SCHEMAS.md](docs/TOOL_INPUT_SCHEMAS.md): Claude Code tool input JSON reference
-- [docs/CODE_ARCHITECTURE.md](docs/CODE_ARCHITECTURE.md): components, modules, data flow
-- [docs/FILE_STRUCTURE.md](docs/FILE_STRUCTURE.md): directory map, where to add new work
-- [docs/CLAUDE_HOOK_USAGE_GUIDE.md](docs/CLAUDE_HOOK_USAGE_GUIDE.md): allowed/denied patterns for AI agents
-- [docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md): protected-branch workflow (agents prepare, humans commit)
-- [docs/CHANGELOG.md](docs/CHANGELOG.md): chronological record of changes
-- [example.toml](example.toml): starter config with deny/allow rules and variables
-
-## Testing
-
-    cargo test                                       # Rust unit + integration tests
-    source source_me.sh && python3 tools/run_command_decisions.py
-                                                     # decision-table regression
-                                                     # against live + example configs
-    source source_me.sh && python3 -m pytest tests/  # repo-wide Python lint gates
+- [docs/CLAUDE_HOOK_USAGE_GUIDE.md](docs/CLAUDE_HOOK_USAGE_GUIDE.md) - what the hook allows, denies, and steers; preferred recovery paths for denied patterns.
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) - dated record of rule changes, decisions, and failures.
+- [docs/REPO_STYLE.md](docs/REPO_STYLE.md) - repo-wide conventions including changelog rotation and `README.md` rules.
+- [docs/PYTHON_STYLE.md](docs/PYTHON_STYLE.md) - Python style rules for the tooling under `tools/` and `tests/`.
+- [AGENTS.md](AGENTS.md) - agent workflow guardrails.
 
 ## License
 
-GPLv3. See LICENSE file for details.
-
-## Maintainer
-
-Neil Voss, https://bsky.app/profile/neilvosslab.bsky.social
+LGPLv3. See [LICENSE.LGPL_v3](LICENSE.LGPL_v3).

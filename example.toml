@@ -32,7 +32,10 @@ CHECKSUM_CMDS = "md5|md5sum|shasum|sha256sum"
 # Filesystem navigation and inspection
 FS_CMDS = "basename|cd|chmod|cp|dirname|du|df|ln|ls|lsof|mkdir|mktemp|open|readlink|realpath|stat|tar|touch|tree|type|unlink|unzip|which"
 # Process info and management
-PROC_CMDS = "pgrep|pkill|ps|sleep|timeout"
+# wait is a Bash builtin used for dev-server lifecycle (`wait $DEVPID`); included
+# here so a bare `wait` leaf is auto-allowed. kill is intentionally NOT included
+# (too powerful: signals arbitrary PIDs, including user shells) -- passthrough.
+PROC_CMDS = "pgrep|pkill|ps|sleep|timeout|wait"
 # System info and shell builtins
 SYS_CMDS = "curl|date|echo|env|export|expr|false|id|nproc|numfmt|printenv|printf|pwd|screencapture|source|test|true|tty|uname|whoami|xcrun|xxd"
 # Build and lint tools (read-only or local-build only, no installs)
@@ -377,10 +380,33 @@ command_regex = "\\$PYTHON\\b|\\$\\{PYTHON\\}"
 reason = "Use `python3` directly. The `$PYTHON` variable is rejected because the actual interpreter name is clearer."
 
 # Deny bare env-var-only assignment (no command following).
+# The exclude carves out the dev-server lifecycle idiom `VAR=$!` (capture last
+# background PID), `VAR=$?` (capture last exit code), and `VAR=$$` (current
+# PID). These are explicitly allowed by a dedicated rule below.
 [[deny]]
 tool = "Bash"
 command_regex = "^[A-Za-z_]+=[^\\s]+$"
+command_exclude_regex = "^[A-Z_][A-Z0-9_]*=\\$[!?$]$"
 reason = "Run a command after the assignment (e.g. `FOO=x command ...`), or set the variable inside your script. A bare `VAR=value` leaf with no command is rejected because the decomposer splits it into a useless leaf."
+
+# Deny empty / whitespace-only / literal-"null" Bash commands. The decomposer
+# yields a single empty leaf for an empty command string, and `null` is JSON
+# null serialized as a string. Either form is a no-op and should not silently
+# passthrough -- a steer reminds the agent to provide a real command.
+# 2026-05-21 audit: 16 null/whitespace passthrough entries observed.
+[[deny]]
+tool = "Bash"
+command_regex = "^\\s*(null)?\\s*$"
+reason = "Provide a real Bash command (e.g. `pwd`, `ls`, `git status`). Empty, whitespace-only, or literal-`null` commands are rejected because they are no-ops."
+
+# Allow `VAR=$!`, `VAR=$?`, `VAR=$$` -- dev-server lifecycle PID/status capture.
+# Examples: `DEVPID=$!`, `SERVER_PID=$!`, `STATUS=$?`. Narrow shape:
+# SCREAMING_SNAKE name = $ + one of {! ? $} only, end of leaf. Anything broader
+# (e.g. `FOO=$BAR`) stays denied by the bare env-var-only deny above. The
+# exclude on that deny carves these out so this allow can fire.
+[[allow]]
+tool = "Bash"
+command_regex = "^[A-Z_][A-Z0-9_]*=\\$[!?$]$"
 
 # Deny python -c inline code in every invocation form: bare `python3 -c`,
 # `python -c`, version-suffixed `python3.12 -c`, absolute-path binaries
@@ -842,10 +868,15 @@ command_exclude_regex = "(\\s|^|=)/(${NON_TMP_ROOTS})\\b|${NO_CMD_SUB}"
 # Env-var prefixes (PYTHONPATH=...) are stripped by the decomposer.
 # -------------------------------------------------------------------
 
+# Broad python allow, with `-m <module>` carve-outs so machine-changing modules
+# (`pip`, `venv`, `ensurepip`) fall through to user approval, and `json.tool`
+# with a file path falls through to passthrough so the agent uses the Read tool
+# instead. Other `-m <module>` shapes (`pytest`, `pyflakes`, `http.server`,
+# `json.tool` on stdin, `timeit`, `unittest`) remain auto-allowed by this rule.
 [[allow]]
 tool = "Bash"
 command_regex = "^(python3?|/opt/homebrew/opt/python@3\\.12/bin/python3\\.12|PYTHONPATH=)\\s?"
-command_exclude_regex = "${NO_CMD_SUB}"
+command_exclude_regex = "${NO_CMD_SUB}|\\s+-m\\s+(pip|venv|ensurepip)\\b|\\s+-m\\s+json\\.tool\\s+\\S"
 
 # Allow homebrew python running .py files directly (but not -c)
 [[allow]]
@@ -875,7 +906,8 @@ command_exclude_regex = "${NO_CMD_SUB}"
 # are auto-allowed. Bare -e/--eval and unrecognized --long-flags passthrough.
 # Allowed flag tokens before the trailing script path:
 #   --test, --watch, --check, -c, --loader(=|<space>)<arg>,
-#   --import(=|<space>)<arg>, any short -<letters> flag.
+#   --import(=|<space>)<arg>, --test-name-pattern(=|<space>)<arg>,
+#   --test-only, --test-reporter(=|<space>)<arg>, any short -<letters> flag.
 # Allowed script extensions: .js .mjs .cjs .ts .tsx
 # The trailing `(\s.*)?$` intentionally allows arbitrary script arguments
 # AFTER the script path (e.g. `node app.js --port 3000`): once the script
@@ -884,7 +916,7 @@ command_exclude_regex = "${NO_CMD_SUB}"
 # nothing unexpected can hide between the extension and end-of-leaf.
 [[allow]]
 tool = "Bash"
-command_regex = "^node\\s+((--test|--watch|--check|-c|--loader(=|\\s+)\\S+|--import(=|\\s+)\\S+|-[a-zA-Z]+)\\s+)*[A-Za-z0-9_./-]+\\.(js|mjs|cjs|ts|tsx)(\\s.*)?$"
+command_regex = "^node\\s+((--test|--watch|--check|-c|--loader(=|\\s+)\\S+|--import(=|\\s+)\\S+|--test-name-pattern(=|\\s+)\\S+|--test-only|--test-reporter(=|\\s+)\\S+|-[a-zA-Z]+)\\s+)*[A-Za-z0-9_./-]+\\.(js|mjs|cjs|ts|tsx)(\\s.*)?$"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # Bare diagnostic / no-script forms: node --test (runs default test glob),
@@ -1260,6 +1292,15 @@ tool_regex = "^(TaskOutput|TaskCreate|TaskList|TaskGet|TaskUpdate|TaskStop|Skill
 #   - CronCreate       (user should approve scheduled recurring jobs)
 #   - CronDelete       (user should approve canceling scheduled jobs)
 #   - CronList         (read-only but kept consistent with Cron tools)
+#
+# The following four tools are NOT allow-listed (so they default to passthrough)
+# but are also filtered out of the passthrough-only audit log by
+# `DESIGN_PASSTHROUGH_TOOLS` in `src/auditing.rs`. The skip is audit-log-only;
+# the decision is still passthrough for the runtime hook.
+#   - ScheduleWakeup    (loop self-pacing schedule; user-initiated)
+#   - SendUserFile      (user-facing file delivery; downstream UI handles)
+#   - PushNotification  (user-facing notification; downstream UI handles)
+#   - LSP               (language-server queries; downstream IDE handles)
 # -------------------------------------------------------------------
 
 # -------------------------------------------------------------------

@@ -71,11 +71,35 @@ struct PassthroughEntry {
     cwd: String,
 }
 
+/// Tools that are passthrough by design (Claude Code requires an interactive
+/// user dialog for these). They cannot be allow-rule-promoted, so logging
+/// them in the passthrough gap-finding log adds noise. Sorted alphabetically
+/// for greppability.
+const DESIGN_PASSTHROUGH_TOOLS: &[&str] = &[
+    "AskUserQuestion",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "EnterPlanMode",
+    "EnterWorktree",
+    "ExitPlanMode",
+    "ExitWorktree",
+    "LSP",
+    "PushNotification",
+    "ScheduleWakeup",
+    "SendUserFile",
+];
+
 /// Write a passthrough event to the dedicated passthrough log file.
 ///
 /// This log captures commands that matched neither allow nor deny rules,
 /// letting the operator identify rule gaps later.
 pub fn audit_passthrough(passthrough_path: &Path, input: &HookInput) {
+    // Skip tools that are passthrough by design; they would pollute the
+    // gap-finding log because they can never be promoted to an allow rule.
+    if DESIGN_PASSTHROUGH_TOOLS.contains(&input.tool_name.as_str()) {
+        return;
+    }
     if let Err(e) = try_audit_passthrough(passthrough_path, input) {
         warn!("Failed to write passthrough entry: {}", e);
     }
@@ -274,5 +298,28 @@ mod tests {
         // Passthrough entries should NOT have decision/reason
         assert!(entry.get("decision").is_none());
         assert!(entry.get("reason").is_none());
+    }
+
+    #[test]
+    fn test_audit_passthrough_skips_design_passthrough_tools() {
+        use tempfile::NamedTempFile;
+
+        let tmp = NamedTempFile::new().expect("Failed to create temp file");
+        let path = tmp.path().to_path_buf();
+
+        let input = HookInput {
+            session_id: "pt-session".to_string(),
+            transcript_path: "/tmp/t".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "ExitPlanMode".to_string(),
+            tool_input: json!({"plan": "do stuff"}),
+        };
+
+        audit_passthrough(&path, &input);
+
+        // File should remain empty (writer returned early).
+        let content = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(content, "");
     }
 }
