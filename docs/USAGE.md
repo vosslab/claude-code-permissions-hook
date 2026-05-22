@@ -107,10 +107,23 @@ passthrough -- Claude Code then falls back to its normal permission flow.
 
 ## Tests
 
-Developer test commands live in [config_test.sh](../config_test.sh)
-(`cargo build --release`, `cargo test`, the `validate` check, and the
-`tools/run_command_decisions.py` decision-table regression). For pytest
-style and test layout, see [PYTEST_STYLE.md](PYTEST_STYLE.md).
+Run the full developer test suite via [config_test.sh](../config_test.sh):
+
+```bash
+bash config_test.sh
+```
+
+It runs `cargo build --release`, `cargo test`, the `validate` check, and the `tools/run_command_decisions.py` decision-table regression. For pytest style and test layout, see [PYTEST_STYLE.md](PYTEST_STYLE.md).
+
+## Maintenance
+
+Refresh the Rust toolchain with [update_rust.sh](../update_rust.sh):
+
+```bash
+./update_rust.sh
+```
+
+Upgrades `rustup` via Homebrew, runs `rustup update`, prints `rustc`/`cargo`/`rustup` versions.
 
 ## Known gaps
 

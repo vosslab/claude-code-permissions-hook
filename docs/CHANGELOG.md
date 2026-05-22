@@ -2,8 +2,15 @@
 
 ## 2026-05-22
 
+### Additions and New Features
+
+- Added `Brewfile` at repo root declaring `rustup` and `python@3.12` Homebrew formulae for one-step macOS dependency install (`brew bundle`).
+
 ### Behavior or Interface Changes
 
+- `docs/INSTALL.md` gained a `## Quick install (macOS)` section pointing at the new `Brewfile`, ahead of the existing `## Install steps` flow. Quick-install block also documents [update_rust.sh](../update_rust.sh) for toolchain refresh.
+- `docs/INSTALL.md` rewritten end-to-end for novice terminal users: six numbered steps (clone, install deps, build, config, register hook, verify), explicit macOS Homebrew vs Linux curl branches, absolute-path printing helpers (`echo "$(pwd)/..."`), concrete `~/.claude/settings.json` example with `/ABSOLUTE/PATH/TO/` placeholders, `Updating later` section, and `Troubleshooting` table covering the five common failure modes.
+- `docs/USAGE.md` `## Tests` section rewritten as runnable `bash config_test.sh` block; added new `## Maintenance` section pointing at [update_rust.sh](../update_rust.sh).
 - `README.md` Documentation section now links `docs/INSTALL.md` and `docs/USAGE.md` ahead of the existing CLAUDE_HOOK_USAGE_GUIDE / CHANGELOG / REPO_STYLE / PYTHON_STYLE / AGENTS entries. Readers reaching the repo root now have a direct path to the install and usage docs.
 - `README.md` restructured by `readme-docs` skill (docs/ has 19 files, large docset per skill rules). Documentation section split into three labeled subsections: `Getting started` (INSTALL, USAGE, CLAUDE_HOOK_USAGE_GUIDE), `Reference` (CONFIGURATION_GUIDE, CODE_ARCHITECTURE, FILE_STRUCTURE, TOOL_INPUT_SCHEMAS, CHANGELOG), and `Repo standards` (AGENTS, REPO_STYLE, PYTHON_STYLE, PYTEST_STYLE, MARKDOWN_STYLE). Added a `Testing` section pointing at `config_test.sh`. Quick start step 3 now uses the direct binary path (`./target/release/...`) instead of `cargo run --release`, matching `docs/INSTALL.md`. Quick start step 4 swapped from a test command to the hook registration step (full procedure in `docs/INSTALL.md`). README now 42 lines.
 
