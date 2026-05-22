@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-05-22
+
+### Behavior or Interface Changes
+
+- `README.md` Documentation section now links `docs/INSTALL.md` and `docs/USAGE.md` ahead of the existing CLAUDE_HOOK_USAGE_GUIDE / CHANGELOG / REPO_STYLE / PYTHON_STYLE / AGENTS entries. Readers reaching the repo root now have a direct path to the install and usage docs.
+- `README.md` restructured by `readme-docs` skill (docs/ has 19 files, large docset per skill rules). Documentation section split into three labeled subsections: `Getting started` (INSTALL, USAGE, CLAUDE_HOOK_USAGE_GUIDE), `Reference` (CONFIGURATION_GUIDE, CODE_ARCHITECTURE, FILE_STRUCTURE, TOOL_INPUT_SCHEMAS, CHANGELOG), and `Repo standards` (AGENTS, REPO_STYLE, PYTHON_STYLE, PYTEST_STYLE, MARKDOWN_STYLE). Added a `Testing` section pointing at `config_test.sh`. Quick start step 3 now uses the direct binary path (`./target/release/...`) instead of `cargo run --release`, matching `docs/INSTALL.md`. Quick start step 4 swapped from a test command to the hook registration step (full procedure in `docs/INSTALL.md`). README now 42 lines.
+
+### Fixes and Maintenance
+
+- Refreshed `docs/INSTALL.md` per the `install-usage-docs` skill audit: added a Known-gaps row for exact macOS / Linux versions tested (88 lines, inside the 40-120 budget).
+- Refreshed `docs/USAGE.md`: trimmed the Examples blocks to drop the duplicated full-schema JSON output snippets (the schema still lives in the Output section), replaced `Running tests` with a one-paragraph `Tests` pointer to `config_test.sh` and `docs/PYTEST_STYLE.md`, and added a `--dry-run` Known-gaps placeholder (no such flag in `src/main.rs`).
+- Post-audit fixes from `audit-code-reviewer` pass: corrected `docs/INSTALL.md` `## Verify install` expected-output block to match the real `src/main.rs:92-94` `println!` (`Valid: loaded N rules (D deny, A allow)` plus the indented `Audit file` and `Audit level` lines; no `[INFO]` prefix). Replaced the misleading backticked `Matched rule` quote in `docs/USAGE.md` Examples with a description of `permissionDecisionReason`. Rewrote the `Tests` pointer sentence as a full clause instead of a label-colon fragment.
+
+### Developer Tests and Notes
+
+- `pytest tests/test_markdown_links.py tests/test_ascii_compliance.py` runs 2/2 green after the doc edits.
+- `audit-code-reviewer` skill ran six parallel reviewers (Plan, Test, Style, Docs, Legacy, Comment). Findings: 1 blocker (README missing INSTALL/USAGE links -- now fixed), 1 high (stale INSTALL.md validate output -- now fixed), 3 medium (`Matched rule` truncated quote -- fixed; long CHANGELOG bullet -- this split; `--dry-run` Known-gaps speculative -- deferred to user), 1 low (`Tests:` fragment phrasing -- fixed). Out-of-scope finding: `tests/test_toml_parse.py:77` `len()` parity assertion is fragile per `docs/PYTEST_STYLE.md` (pre-existing).
+
 ## 2026-05-21
 
 ### Additions and New Features

@@ -36,36 +36,32 @@ The binary has two subcommands:
 
 ## Examples
 
+Each example shows the stdin payload as compact JSON; output is described
+in plain terms (full schema in the [Output (stdout)](#output-stdout)
+section below).
+
 ### Allow a cargo command
 
 ```bash
-echo '{"session_id":"s1","transcript_path":"/tmp/t","cwd":"/home/user","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cargo test"}}' \
+echo '{"tool_name":"Bash","tool_input":{"command":"cargo test"},"session_id":"s1","transcript_path":"/tmp/t","cwd":"/home/user","hook_event_name":"PreToolUse"}' \
   | ./target/release/claude-code-permissions-hook run --config example.toml
 ```
 
-Output (allowed):
-
-```json
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Matched rule for Bash with command: cargo test"},"suppressOutput":true}
-```
+Result: `permissionDecision` is `allow`; `permissionDecisionReason` names the matched rule and the command.
 
 ### Deny a dangerous command
 
 ```bash
-echo '{"session_id":"s1","transcript_path":"/tmp/t","cwd":"/home/user","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' \
+echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"s1","transcript_path":"/tmp/t","cwd":"/home/user","hook_event_name":"PreToolUse"}' \
   | ./target/release/claude-code-permissions-hook run --config example.toml
 ```
 
-Output (denied):
-
-```json
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"..."},"suppressOutput":true}
-```
+Result: `permissionDecision` is `deny`; `permissionDecisionReason` carries the steer text from the matching deny rule.
 
 ### Passthrough (no output)
 
-When a tool call matches neither allow nor deny rules, the hook produces
-no stdout output. Claude Code then falls back to its normal permission flow.
+When a call matches no rule, the hook writes nothing to stdout and Claude
+Code falls back to its default permission flow.
 
 ## Inputs and outputs
 
@@ -109,24 +105,16 @@ passthrough -- Claude Code then falls back to its normal permission flow.
 - **Passthrough log** (`passthrough_log_file` in config) - JSON-lines file
   recording commands that matched no rules, for identifying rule gaps.
 
-## Running tests
+## Tests
 
-Rust unit and integration tests:
-
-```bash
-cargo test
-```
-
-Decision-table regression (runs every row in
-[command_decisions.tsv](../tests/command_decisions.tsv) against the
-live config and `example.toml`; intentionally outside pytest):
-
-```bash
-source source_me.sh && python3 tools/run_command_decisions.py
-source source_me.sh && python3 tools/run_command_decisions.py ffprobe  # filter
-```
+Developer test commands live in [config_test.sh](../config_test.sh)
+(`cargo build --release`, `cargo test`, the `validate` check, and the
+`tools/run_command_decisions.py` decision-table regression). For pytest
+style and test layout, see [PYTEST_STYLE.md](PYTEST_STYLE.md).
 
 ## Known gaps
 
-- [ ] Document supported tool names exhaustively (currently inferred from
-  [TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md)).
+- [ ] Document supported `tool_name` values exhaustively (currently
+  inferred from [TOOL_INPUT_SCHEMAS.md](TOOL_INPUT_SCHEMAS.md)).
+- [ ] Document a `--dry-run` flag once available; none currently exists
+  in `src/main.rs`.

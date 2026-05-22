@@ -2,6 +2,7 @@ claude-code-permissions-hook.toml
 report*.txt
 .DS_Store
 # === UNIVERSAL ===
+report_*.txt
 _temp*.?*
 # === RUST ===
 /target/

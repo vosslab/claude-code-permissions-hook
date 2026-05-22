@@ -70,18 +70,16 @@ Validate the config file compiles without errors:
 ./target/release/claude-code-permissions-hook validate --config example.toml
 ```
 
-Expected output (with `RUST_LOG=info`); the rule counts reflect whatever
-config you pass:
+Expected output (rule counts and paths reflect whatever config you pass):
 
 ```
-[INFO] Configuration is valid!
-[INFO]   Deny rules: <N>
-[INFO]   Allow rules: <N>
-[INFO]   Audit file: /tmp/claude-tool-use.json
-[INFO]   Audit level: Matched
+Valid: loaded <total> rules (<deny> deny, <allow> allow)
+  Audit file:  /tmp/claude-tool-use.json
+  Audit level: Matched
 ```
 
 ## Known gaps
 
 - [ ] Verify whether the `nix` crate `flock` works on all Linux distributions.
 - [ ] Confirm minimum supported Rust version (MSRV); currently uses `edition = "2024"`.
+- [ ] Confirm exact macOS and Linux versions tested (only "macOS or Linux" stated above).
