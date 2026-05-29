@@ -1471,4 +1471,52 @@ deny	null
 # node test runner with --import + --test-name-pattern=<arg>; NODE_OPTIONS=
 # prefix is stripped by the decomposer before the node allow rule fires.
 allow	node --import tsx --import ./tests/fixtures/x.mjs --test --test-name-pattern=rng tests/x.ts
+
+# === 2026-05-29 passthrough audit: new rules ===
+# /usr/bin/time absolute binary denied; bare `time` keyword stripped + inner allowed.
+deny	/usr/bin/time -p node app.mjs
+deny	/usr/bin/time -p python3 script.py
+allow	time node app.mjs
+allow	time python3 -m pytest tests/
+# node test runner: quoted-glob path arg and .mts/.cts extensions.
+allow	node --import tsx --test 'tests/test_*.mjs'
+allow	node --import tsx --test tests/test_protocol_hud.mts
+allow	node app.cts
+# npx global flags before whitelisted package.
+allow	npx --prefix /tmp/proj tsc --version
+allow	npx -y prettier --check .
+# pdfinfo readonly poppler tool.
+allow	pdfinfo /tmp/x.pdf
+# echo/printf/ps/pgrep carry $() in args (decomposer vets the inner leaf).
+allow	echo $(date +%s)
+allow	echo "LIVENESS_$(date +%s)_END"
+allow	ps -p $(pgrep -f make_walk) -o pid,etime,pcpu
+allow	printf 'x=%s\n' "$(grep -c PAT /tmp/cck-test/main.rs)"
+# ... but a dangerous inner is still denied (inner extracted as its own leaf).
+deny	echo $(rm -rf /important_dir)
+# chmod is NOT in the $()-trust group; inner echo of a credential path denies.
+deny	chmod 777 $(echo /etc/passwd)
+# printf to stdout allowed; printf redirected to a file denied (Write-tool steer),
+# including markdown content with table `|` and entity `&` that defeated the old gate.
+allow	printf 'hello world\n'
+allow	printf 'a -> b\n'
+deny	printf '# title\n' > /tmp/out.md
+deny	printf '| a | b |\n## h &amp; more\n' > /tmp/audit.md
+deny	printf 'data' | tee /tmp/x.md
+# git: -c and --no-pager global flags before a safe subcommand.
+allow	git --no-pager diff -- a.py
+allow	git -c status.renames=true status -M --short
+# nohup denied (steer to background tool).
+deny	nohup python3 run.py
+# loop deny requires real loop syntax; quoted grep pattern with |for / |while is allowed.
+allow	grep -E 'until |for ' /tmp/cck-test/main.rs
+allow	grep -E 'a|while' /tmp/cck-test/main.rs
+deny	for f in *.py; do echo $f; done
+deny	while true; do sleep 1; done
+deny	until [ -f /tmp/x ]; do sleep 3; done
+deny	for ((i=0;i<3;i++)); do echo $i; done
+# git rebase denied on all branches; only --abort is the escape hatch (passthrough).
+deny	git rebase -i HEAD~3
+deny	git rebase main
+passthrough	git rebase --abort
 allow	NODE_OPTIONS=--disable-warning=DEP0205 node --test tests/x.mjs

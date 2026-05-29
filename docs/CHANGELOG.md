@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-05-29
+
+### Additions and New Features
+
+- Added `pdfinfo` to `INSPECT_CMDS` (both configs). The poppler page-count/metadata tool is read-only and now auto-allowed alongside `pdftotext`. A missing binary fails loudly with `command not found`, which is correct feedback; the hook gates permission, not install state.
+- Added a `NO_BACKTICK = "`"` TOML variable (both configs) and a new allow rule for `echo|printf|ps|pgrep` that excludes only `NO_BACKTICK` (not `${NO_CMD_SUB}`). These four commands cannot mutate the filesystem or read sensitive files based on a substituted value, and the decomposer already extracts every `$(...)` inner command as its own leaf for independent deny/allow evaluation (deny wins). Result: `echo "TAG_$(date +%s)"`, `printf '%s' "$(grep -c PAT f)"`, and `ps -p $(pgrep -f x)` now auto-allow instead of stalling at passthrough, while a dangerous inner like `$(rm -rf /important)` is still denied via the extracted leaf. Backticks stay blocked (the decomposer does not extract backtick substitutions).
+- Extended the `node` allow rule (both configs): added `.mts`/`.cts` script extensions and a quoted-glob path argument, so `node --import tsx --test 'tests/test_*.mjs'` (node:test glob form) and `node x.mts` auto-allow.
+- Extended the `npx` allow rule (both configs): optional global flags `--prefix <path>` / `-p <path>` / `--package <pkg>` / `--yes`/`-y` / `--no-install` / `--no` may precede the whitelisted package, covering monorepo invocations like `npx --prefix /path/to/project tsc --version`.
+- Extended the `git` allow rule (both configs): `-c <key=val>` and `--no-pager` global flags are now skipped before the safe subcommand (previously only `-C <path>` was), so `git -c status.renames=true status` and `git --no-pager diff` auto-allow.
+
+### Behavior or Interface Changes
+
+- **`git rebase` is now denied on ALL branches** (both configs), not just protected ones. Removed `protected_branch_check = true` from the rebase deny and added `command_exclude_regex = "\\brebase\\s+--abort\\b"` so only the abort escape hatch survives (as passthrough). Rationale (user decision, passthrough audit 2026-05-29): humans run rebases; agents stage work on an `agent/<task>` branch and let the human rebase or prepare a merge. `rebase --continue` was already denied unconditionally.
+- **`nohup` is now denied** (both configs), steered to the Bash tool's `run_in_background` mode plus the Monitor tool. `nohup ... &` orphans processes outside the harness's tracking and drives the hand-rolled PID juggling (`echo $!`, `ps/pgrep` polling, bare `until`-loops) seen across the audit log.
+- **Absolute `/usr/bin/time` and `/bin/time` are now denied** (both configs), steered to the bare `time` keyword. The decomposer strips a leading `time` keyword, so `time node app.mjs` already evaluates the inner `node app.mjs` and auto-allows; the absolute binary path was a workaround that bypassed leaf evaluation.
+- **`until` loops are now denied** alongside `while` (both configs). until-poll loops are the hand-rolled background-waiting that the Monitor tool / `run_in_background` mode replace.
+
+### Fixes and Maintenance
+
+- Fixed a `printf`-redirect deny leak (both configs). The old body gate `[^|;&]*` stopped scanning at the first `|` (markdown table rows) or `&` (HTML entities like `&amp;`, `&alpha;`) in the printf content, so large markdown audit reports written via `printf '...' > file.md` leaked through to passthrough. New regex `(?s)^...printf\b.*(?:(?:^|\s)>>?\s*[^\s>]|\|\s*tee\b)`: `(?s).*` allows any body char incl newlines; the redirect operator is anchored at start-of-leaf or after whitespace so a literal arrow (`a->b`) in stdout content does not false-positive. Tradeoff: a printf printing literal " > " text to stdout is denied (steered to Write/echo) -- rare and acceptable.
+- Fixed a `for`/`while` loop deny false-positive (both configs). The old keyword-only anchors (`(^|[|;&]\s*|\bdo\s+)for\b` and `...while\b`) matched a `|for` / `|while` sequence INSIDE a quoted grep pattern (e.g. `grep -E 'until |for ' file`), wrongly denying a legitimate file search. The denies now require real loop SYNTAX: `for\s+(\w+\s+in\b|\(\()` (for-NAME-in or C-style `for ((`) and `(while|until)\b.*?\bdo\b` (keyword + condition + `do`). Real loops still deny; quoted search patterns no longer false-match.
+- Added 30+ fixtures to `tests/command_decisions.tsv` covering all of the above: `/usr/bin/time` deny + bare `time` allow, node quoted-glob/`.mts`/`.cts`, npx global flags, pdfinfo, echo/printf/ps/pgrep `$()` allow, dangerous-inner deny, printf markdown-redirect deny, git `-c`/`--no-pager` allow, nohup deny, loop quoted-pattern false-positive guard, real-loop denies, and git rebase deny/abort.
+
+### Decisions and Failures
+
+- Backtick-in-grep (e.g. `grep -c "...py`" file.md`) intentionally stays **passthrough**, not allow: the pattern contains a literal backtick, the decomposer cannot extract/verify backtick substitutions, so the backtick guard keeps it from auto-allowing. Passthrough = one user approval (safe). A real fix needs quote-aware backtick handling in `src/decomposer.rs` -- a larger, separate change.
+- Passthrough audit of `/tmp/claude-passthrough.json` (38 records) drove these changes. All logged passthroughs were legitimate agent work stalling on rule gaps (none malicious); two were correct by-design passthroughs (`npm install`, kept). Dogfooding note: during the audit the assistant's own `grep ... 'for '` and `'while'` patterns were false-denied by the loop rules, which surfaced the bug now fixed.
+
+### Developer Tests and Notes
+
+- `tools/run_command_decisions.py` runs 2178 rows green across both configs (live `~/.config/claude-code-permissions-hook.toml` and `example.toml`); `cargo test` green (decomposer/matcher/protected-branch suites).
+
 ## 2026-05-28
 
 ### Additions and New Features

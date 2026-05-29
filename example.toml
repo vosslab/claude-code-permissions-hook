@@ -26,7 +26,11 @@ SEARCH_CMDS = "grep|jq|rg"
 # Formatting and layout (presentation of text)
 FORMAT_CMDS = "column|expand|fmt|fold|nl|paste|unexpand"
 # File-content inspection utilities (read-only)
-INSPECT_CMDS = "file|mediainfo|pdftotext"
+# pdfinfo/pdftotext are poppler readonly tools; pdfinfo reports page count
+# and metadata. If a binary is not installed the command fails loudly with
+# "command not found", which is correct feedback -- the hook gates permission,
+# not install state.
+INSPECT_CMDS = "file|mediainfo|pdfinfo|pdftotext"
 # Checksums and hashes (read-only)
 CHECKSUM_CMDS = "md5|md5sum|shasum|sha256sum"
 # Filesystem navigation and inspection
@@ -71,6 +75,13 @@ TOOL_PATH = "(?:/(?:[^/\\s]+/)*)?"
 # --- Security patterns ---
 # Block command substitution (backtick and $(...)) to prevent injection
 NO_CMD_SUB = "`|\\$\\("
+# Block only backtick substitution. Used by allow rules for non-mutating
+# stdout/proc commands (echo, printf, ps, pgrep) where `$(...)` is safe:
+# the decomposer extracts every `$(...)` inner command as its own leaf and
+# evaluates it independently against deny/allow rules (deny wins), so a
+# dangerous inner like `$(rm -rf /)` is still blocked. Backticks are NOT
+# extracted by the decomposer, so they stay blocked here.
+NO_BACKTICK = "`"
 # Path traversal exclusion (blocks .. in paths)
 NO_TRAVERSAL = "\\.\\."
 
@@ -335,12 +346,15 @@ command_regex = ".*${GIT_INVOCATION}(?:cherry-pick|revert)\\b"
 protected_branch_check = true
 reason = "Use a feature branch for cherry-pick or revert, then prepare a merge with `git merge --no-commit --no-ff`. Cherry-pick and revert on protected branches are rejected because they create commits."
 
-# Deny rebase on protected branches
+# Deny rebase on ALL branches. Rebases rewrite history; humans run them.
+# Agents stage work on an agent/<task> branch and let the human rebase or
+# prepare a merge. Only `--abort` (the escape hatch) is allowed. Note
+# `rebase --continue` is already denied unconditionally above.
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}rebase\\b"
-protected_branch_check = true
-reason = "Use a feature branch for rebase, then prepare a merge with `git merge --no-commit --no-ff`. Rebase on protected branches is rejected."
+command_exclude_regex = "\\brebase\\s+--abort\\b"
+reason = "Humans run rebases. Stage your work on an `agent/<task>` branch and ask the human to rebase, or prepare a merge with `git merge --no-commit --no-ff agent/<task>`. `git rebase` is rejected on all branches (only `git rebase --abort` is allowed as an escape hatch)."
 
 # --- Privilege escalation ---
 
@@ -364,6 +378,27 @@ reason = "Download the script first with `curl -o local_file.ts <url>`, review i
 tool = "Bash"
 command_regex = "\\b(curl|wget|fetch)\\b[^|]*\\|\\s*${TOOL_PATH}(python3?|bash|sh|zsh|node|ruby|perl)\\b"
 reason = "Download to a local file first with `curl -o <file> <url>`, review it, then execute. Piping remote content to a runtime (curl|bash, wget|python, etc.) is rejected -- it is the classic RCE shape."
+
+# --- Process / background management steering ---
+
+# Deny nohup. The harness already provides background execution (the Bash
+# tool's run_in_background mode) plus the Monitor tool for streaming output
+# and TaskOutput for retrieval. `nohup ... &` orphans a process outside that
+# tracking and leads to hand-rolled PID juggling (echo $!, ps/pgrep polling,
+# bare until-loops). Steer back to the native mechanism.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}nohup\\b"
+reason = "Use the Bash tool's background mode (run_in_background) plus the Monitor tool to manage long-running processes. `nohup ... &` is rejected because it orphans processes outside the harness's tracking; the harness already provides background execution and output capture."
+
+# Deny the absolute /usr/bin/time (and /bin/time) binary. Steer to the bare
+# `time` keyword, which the decomposer strips so the inner command is
+# evaluated on its own (e.g. `time node app.mjs` -> `node app.mjs`). Absolute
+# utility paths are a workaround that bypasses normal leaf evaluation.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}/(?:usr/bin|bin)/time\\b"
+reason = "Use the bare `time <cmd>` keyword from PATH (e.g. `time node app.mjs`), not the absolute `/usr/bin/time` binary. The `time` keyword is stripped by the decomposer and the inner command is evaluated normally; absolute utility paths are rejected."
 
 # --- Python environment steering ---
 
@@ -437,20 +472,28 @@ reason = "Write code to a `_temp.py` or `_temp.sh` file (underscore-prefixed fil
 # Deny for loops (force .py/.sh files for looping logic).
 # The anchor `(^|[|;&]\s*|\bdo\s+)` matches the `for` keyword at start-of-leaf,
 # after a pipe/semicolon/&/&&/||, or after a `do ` (a `for` nested inside a
-# `do ... done` body). The old `^for` anchor only matched a leaf whose first
-# token was `for` and missed these forms (observed slipping through to
-# passthrough in the log review).
+# `do ... done` body).
+# 2026-05-29 audit: the old keyword-only `for\b` false-positived on a `|for`
+# sequence INSIDE a quoted grep pattern (e.g. `grep -E 'until |for ' file`),
+# denying a legitimate file search. The deny now requires real for-loop
+# SYNTAX after the keyword: `for NAME in ...` or the C-style `for ((...))`.
+# A bare `|for ` inside a search pattern lacks the `NAME in` / `((` tail and
+# no longer matches.
 [[deny]]
 tool = "Bash"
-command_regex = "(^|[|;&]\\s*|\\bdo\\s+)for\\b"
+command_regex = "(?s)(^|[|;&]\\s*|\\bdo\\s+)for\\s+(\\w+\\s+in\\b|\\(\\()"
 reason = "Write the loop in a `_temp.py` or `_temp.sh` file (underscore-prefixed files can be removed freely), then run `bash _temp.sh` or `source source_me.sh && python3 _temp.py`. Inline `for` loops in the Bash tool are rejected."
 
-# Deny while loops -- same anchoring as `for` above (start-of-leaf, after
-# pipe/semicolon/&/&&/||, or after `do `).
+# Deny while/until loops -- same anchoring as `for` above. `until` is included
+# because until-poll loops (`until [ -f x ]; do sleep; done`) are the
+# hand-rolled background-waiting that the Monitor tool / Bash run_in_background
+# mode replace. The deny requires real loop SYNTAX: the keyword followed by a
+# condition and a `do` keyword, so a bare `|while`/`|until` inside a quoted
+# grep pattern (e.g. `grep 'a|while' file`) no longer false-matches.
 [[deny]]
 tool = "Bash"
-command_regex = "(^|[|;&]\\s*|\\bdo\\s+)while\\b"
-reason = "Write the loop in a `_temp.py` or `_temp.sh` file (underscore-prefixed files can be removed freely), then run `bash _temp.sh` or `source source_me.sh && python3 _temp.py`. Inline `while` loops in the Bash tool are rejected."
+command_regex = "(?s)(^|[|;&]\\s*|\\bdo\\s+)(while|until)\\b.*?\\bdo\\b"
+reason = "Write the loop in a `_temp.py` or `_temp.sh` file, or use the Monitor tool / Bash run_in_background mode for polling. Inline `while`/`until` loops in the Bash tool are rejected (underscore-prefixed scratch files can be removed freely)."
 
 # Deny redundant bash -c / bash -lc wrappers inside the Bash tool.
 # The Bash tool already runs bash, so bash -c "cmd" is bash-in-bash.
@@ -705,12 +748,22 @@ reason = "Write the JS to a `_temp.mjs` file and run `node _temp.mjs`. `node -e`
 
 # Deny `printf` used as a Write-tool replacement: redirected to a file
 # (`>`, `>>`) or piped to `tee`. Steers to the Write tool (or Edit for
-# appends). Bare `printf '...'` for stdout formatting stays allowed via
-# SYS_CMDS. 2026-05-18 audit: 53 passthrough entries were `printf ...
-# > FILE` / `>> FILE` / `| tee FILE` writing large markdown/code blobs.
+# appends). Bare `printf '...'` for stdout formatting stays allowed.
+# 2026-05-18 audit: 53 passthrough entries were `printf ... > FILE` /
+# `>> FILE` / `| tee FILE` writing large markdown/code blobs.
+# 2026-05-29 audit: the old `[^|;&]*` body gate let markdown audit reports
+# leak through -- table rows (`|`) and HTML entities (`&amp;`, `&alpha;`)
+# in the printf content tripped the negated class before the regex reached
+# the `>` redirect. Replaced with `(?s).*` so the body may contain any
+# char (including newlines for multiline content). The redirect operator is
+# anchored at start-of-leaf or after whitespace ((?:^|\s)>>?) so a literal
+# arrow inside content (e.g. `a->b`) does not false-positive; a real
+# whitespace-separated `printf '...' > file` still matches. Tradeoff: a
+# printf that prints literal " > " text to stdout is denied (steered to the
+# Write tool / echo) -- acceptable and rare.
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}printf\\b[^|;&]*(?:>>?\\s*\\S|\\|\\s*tee\\b)"
+command_regex = "(?s)^${TOOL_PREFIX}${TOOL_PATH}printf\\b.*(?:(?:^|\\s)>>?\\s*[^\\s>]|\\|\\s*tee\\b)"
 reason = "Use the Write tool for new files or the Edit tool for appends. `printf ... > FILE`, `printf ... >> FILE`, and `printf ... | tee FILE` are rejected because they bypass the Write/Edit tools that provide diffs, line counts, and proper change tracking."
 
 # --- WeBWorK steering ---
@@ -930,7 +983,11 @@ command_exclude_regex = "${NO_CMD_SUB}"
 #   --test, --watch, --check, -c, --loader(=|<space>)<arg>,
 #   --import(=|<space>)<arg>, --test-name-pattern(=|<space>)<arg>,
 #   --test-only, --test-reporter(=|<space>)<arg>, any short -<letters> flag.
-# Allowed script extensions: .js .mjs .cjs .ts .tsx
+# Allowed script extensions: .js .mjs .cjs .mts .cts .ts .tsx
+# The trailing path token may be wrapped in single/double quotes and may
+# contain glob metacharacters (* ? [ ]) so `node --import tsx --test
+# 'tests/test_*.mjs'` (the node:test glob form) auto-allows. The extension
+# anchor still applies inside the quotes.
 # The trailing `(\s.*)?$` intentionally allows arbitrary script arguments
 # AFTER the script path (e.g. `node app.js --port 3000`): once the script
 # itself is an allowed local file, its own argv is the script's concern, not
@@ -938,7 +995,7 @@ command_exclude_regex = "${NO_CMD_SUB}"
 # nothing unexpected can hide between the extension and end-of-leaf.
 [[allow]]
 tool = "Bash"
-command_regex = "^node\\s+((--test|--watch|--check|-c|--loader(=|\\s+)\\S+|--import(=|\\s+)\\S+|--test-name-pattern(=|\\s+)\\S+|--test-only|--test-reporter(=|\\s+)\\S+|-[a-zA-Z]+)\\s+)*[A-Za-z0-9_./-]+\\.(js|mjs|cjs|ts|tsx)(\\s.*)?$"
+command_regex = "^node\\s+((--test|--watch|--check|-c|--loader(=|\\s+)\\S+|--import(=|\\s+)\\S+|--test-name-pattern(=|\\s+)\\S+|--test-only|--test-reporter(=|\\s+)\\S+|-[a-zA-Z]+)\\s+)*[\"']?[A-Za-z0-9_./*?\\[\\]-]+\\.(js|mjs|cjs|mts|cts|ts|tsx)[\"']?(\\s.*)?$"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # Bare diagnostic / no-script forms: node --test (runs default test glob),
@@ -950,9 +1007,13 @@ command_exclude_regex = "${NO_CMD_SUB}"
 
 # npx with known-safe local dev tool packages only.
 # Unknown packages still passthrough to user prompt.
+# Optional npx global flags may precede the package: --prefix <path> / -p
+# <path> / --package <pkg> (select the install root), --yes/-y, --no-install,
+# --no. This covers monorepo invocations like
+# `npx --prefix /path/to/project tsc --version`.
 [[allow]]
 tool = "Bash"
-command_regex = "^npx\\s+(tsc|tsx|eslint|prettier|playwright|esbuild)(\\s|$)"
+command_regex = "^npx\\s+((--prefix(=|\\s+)\\S+|-p\\s+\\S+|--package(=|\\s+)\\S+|--yes|-y|--no-install|--no)\\s+)*(tsc|tsx|eslint|prettier|playwright|esbuild)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # eslint -- local code linter (read-only analysis)
@@ -1009,9 +1070,14 @@ command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CM
 # stash, clean, reset --hard, push --force, rebase (all denied or passthrough).
 # -------------------------------------------------------------------
 
+# Global flags before the subcommand are skipped: -C <path> (run in dir),
+# -c <key=val> (one-shot config, e.g. `git -c status.renames=true status`),
+# and --no-pager (e.g. `git --no-pager diff`). The subcommand itself is still
+# gated to the read-only / local-only allowlist; destructive forms
+# (reset --hard, push --force) are denied separately above.
 [[allow]]
 tool = "Bash"
-command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|cat-file|check-ignore|checkout|diff|fsck|ls-files|ls-tree|log|mv|pull|reflog|remote|reset|restore|rev-parse|show|status|worktree)(\\s|$)"
+command_regex = "^git\\s+((-C\\s+\\S+|-c\\s+\\S+|--no-pager)\\s+)*(add|branch|cat-file|check-ignore|checkout|diff|fsck|ls-files|ls-tree|log|mv|pull|reflog|remote|reset|restore|rev-parse|show|status|worktree)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
@@ -1109,6 +1175,22 @@ command_regex = "^cd\\s+[\"']?\\$\\(\\s*git\\s+rev-parse\\s+--show-toplevel\\s*\
 [[allow]]
 tool = "Bash"
 command_regex = "^xargs\\b(\\s+-[A-Za-z0-9]+(\\s+\\S+)?)*\\s+(grep|egrep|fgrep|rg)\\b"
+
+# Non-mutating stdout / process-info commands that are safe to carry a
+# `$(...)` substitution in their arguments: echo, printf, ps, pgrep. These
+# cannot mutate the filesystem or read sensitive files based on the
+# substituted value, and the decomposer extracts every `$(...)` inner command
+# as its own leaf for independent deny/allow evaluation (deny wins), so a
+# dangerous inner like `$(rm -rf /)` is still blocked while the outer leaf
+# is allowed. This kills the common `echo "TAG_$(date +%s)"`,
+# `printf '%s' "$(grep -c PAT f)"`, and `ps -p $(pgrep -f x)` passthrough
+# stalls (2026-05-29 audit). Only backticks are excluded (the decomposer
+# does not extract backtick substitutions). printf redirected to a file is
+# still denied above (the deny runs first on the raw command).
+[[allow]]
+tool = "Bash"
+command_regex = "^(echo|printf|ps|pgrep)\\b"
+command_exclude_regex = "${NO_BACKTICK}"
 
 [[allow]]
 tool = "Bash"
