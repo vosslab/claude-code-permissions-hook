@@ -97,7 +97,7 @@ deny	bash -n script.sh
 deny	cat /tmp/x.txt
 deny	head -20 /abs/path/file.txt
 deny	tail -5 /tmp/x.log
-deny	grep pattern /tmp/x.txt
+allow	grep pattern /tmp/x.txt
 deny	rg pattern /abs/search/dir
 allow	find . -name "*.py"
 deny	sed -n '10,20p' /tmp/file.txt
@@ -118,16 +118,16 @@ deny	echo hi && Read README.md
 # rule (that rule anchors on a capital Grep/Read at start of leaf). But
 # WITH a file path it still hits the file-grep deny -- a file search is a
 # file search regardless of what the pattern spells.
-deny	grep -n "sed\|Grep\|Read" /tmp/x.toml
+allow	grep -n "sed\|Grep\|Read" /tmp/x.toml
 # Negative case: same pattern with NO file arg is a stdin filter -> allow.
 allow	echo hi | grep -n "sed\|Grep\|Read"
 
 # --- grep file-search deny: '|' in the pattern must not let it leak ---
 # Regression: [^|]*/ stopped scanning at the first '|' inside the quoted
 # pattern, so any grep with alternation + a file path passed through.
-deny	grep -nE "a|b|c" /Users/vosslab/.claude/plans/x.md
-deny	grep -n -i "fill\|empty\|repeat" docs/active_plans/x.md
-deny	grep -n "foo\|bar" docs/active_plans/x.md
+allow	grep -nE "a|b|c" /Users/vosslab/.claude/plans/x.md
+allow	grep -n -i "fill\|empty\|repeat" docs/active_plans/x.md
+allow	grep -n "foo\|bar" docs/active_plans/x.md
 # absolute-path grep with '|' alternation + file path
 deny	/usr/bin/grep -nE "a|b" /tmp/x.md
 # stdin filters with '|' alternation stay allowed (no file arg)
@@ -267,8 +267,8 @@ deny	echo a b | awk '{print $1}'
 deny	cat /tmp/x.log
 deny	head /tmp/x.log
 deny	tail /tmp/x.log
-deny	grep foo /tmp/x.log
-deny	rg foo /tmp/x.log
+allow	grep foo /tmp/x.log
+allow	rg foo /tmp/x.log
 deny	egrep foo /tmp/x.log
 deny	fgrep foo /tmp/x.log
 deny	egrep -n pat /Users/vosslab/x.py
@@ -549,8 +549,8 @@ deny	/usr/bin/rg foo src/main.ts
 deny	/opt/homebrew/bin/rg foo src/main.ts
 deny	/usr/bin/grep -n foo bar.ts
 deny	/opt/homebrew/bin/rg pattern
-deny	command grep -n foo src/main.ts
-deny	env grep foo src/main.ts
+passthrough	command grep -n foo src/main.ts
+allow	env grep foo src/main.ts
 deny	/bin/cat src/main.ts
 deny	/usr/bin/sed -n 1,80p docs/CHANGELOG.md
 # bash/sh/zsh -n shell-script syntax check (denied; use Read tool)
@@ -836,9 +836,17 @@ allow	xargs /tmp/x
 
 # --- SEARCH_CMDS: grep/rg have a file-path deny; jq does not ---
 allow	grep foo
-deny	grep foo /tmp/x
+allow	grep foo /tmp/x
 allow	rg foo
-deny	rg foo /tmp/x
+allow	rg foo /tmp/x
+# grep/rg CWD-relative + safe-zone paths ALLOW; abs-non-safe + traversal DENY
+allow	grep -n foo src/main.ts
+allow	rg pattern docs/
+allow	rg -n TODO src/sub/file.rs
+deny	grep foo /etc/hosts
+deny	rg pattern /usr/lib/x
+deny	grep foo ../secrets.txt
+deny	rg foo ~/Documents/x
 allow	jq
 allow	jq . /tmp/x
 
@@ -1283,6 +1291,15 @@ allow	find /Users/vosslab/.claude/skills/superpowers -type f
 allow	find $HOME/.claude/agents -name '*.md'
 allow	find $HOME/.claude/commands -type f
 allow	find $HOME/.claude/skills -name 'SKILL.md'
+# grep/rg absolute path inside the workspace safe zone is ALLOWED.
+# Workspace-specific: live=nsh, example=projects. Split per config.
+allow	Bash	claude-code-permissions-hook.toml	{"command": "grep -n foo ~/nsh/repo/src/main.rs"}
+allow	Bash	example.toml	{"command": "grep -n foo ~/projects/repo/src/main.rs"}
+allow	Bash	claude-code-permissions-hook.toml	{"command": "rg pattern /Users/vosslab/nsh/repo/src"}
+allow	Bash	example.toml	{"command": "rg pattern /Users/vosslab/projects/repo/src"}
+# grep/rg into the narrow ~/.claude agent-config subtrees is ALLOWED.
+allow	grep -n foo ~/.claude/skills/superpowers/SKILL.md
+allow	rg pattern /Users/vosslab/.claude/agents
 allow	Bash	claude-code-permissions-hook.toml	{"command": "find /Users/vosslab/nsh/repo -type f -name '*.rs'"}
 allow	Bash	example.toml	{"command": "find /Users/vosslab/projects/repo -type f -name '*.rs'"}
 allow	Bash	claude-code-permissions-hook.toml	{"command": "find /Users/vosslab/nsh/repo/src -name '*.ts'"}

@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-05-28
+
+### Additions and New Features
+
+- Added `tests/test_usage_guide_size.py`, a size guard that fails if `docs/CLAUDE_HOOK_USAGE_GUIDE.md` reaches 40000 characters (currently 38087). The guide is injected into agent context, so it must stay compact; trim or compress it if the test trips.
+
+### Behavior or Interface Changes
+
+- **Policy change: `grep`/`rg` against a file path is now ALLOWED in safe path zones, denied only when the path escapes them.** Rationale: Anthropic removed the `Grep()` tool from this agent context (confirmed 2026-05-16), so Bash `grep`/`rg` is now the primary file-search path; the old blanket file-arg deny created friction with no available tool to steer to, and the user wants agents to search files directly rather than route through `git ls-files`. New shape in both `example.toml` and the live `~/.config/claude-code-permissions-hook.toml`: the grep/rg file-arg deny regex changed from `(grep|egrep|fgrep|rg)\b[^>]*/` (deny on any path-shaped arg) to `(grep|rg)\b[^>]*\s(/|~|\.\.)` with `command_exclude_regex = "\\s(${SAFE_ABS_ZONES})(?:/|\\s|$)"`. Effect: relative/CWD paths (`grep -n foo src/main.rs`, `rg pat docs/`) fall through to the `SAFE_CMDS` allow; absolute paths inside the workspace (`~/<ws>/...`, `/Users/<me>/<ws>/...`, `$HOME/<ws>/...`), `/tmp`, `/private/tmp`, and the narrow `~/.claude/{agents,commands,skills,plugins,plans,projects}` subtrees are excluded from the deny and allowed; out-of-zone absolute paths (`/etc/...`, `/usr/...`, arbitrary non-workspace `/Users/...`), bare `~`, and `..` traversal stay denied (unbounded-scan / context-flood guard).
+- Added a named `SAFE_ABS_ZONES` TOML variable (the absolute branches of `FIND_SAFE_PATH_ARG`, minus the bare-relative branch) so the grep/rg exclude reads `\\s(${SAFE_ABS_ZONES})(?:/|\\s|$)` instead of an inline 200-char alternation. Reused identically in both configs (parameterized by `WORKSPACE_ROOT`, so reason-string parity holds).
+- `egrep`/`fgrep` are now denied for the file-path form on their own rule (deprecated; steer to `grep -E` / `grep -F`); they no longer ride the grep/rg deny. Absolute-binary forms (`/usr/bin/grep`, `/opt/homebrew/bin/rg`) keep their own deny + PATH-discipline steer regardless of the target path. `git grep`, `pcregrep`/`ack`/`ag` (file path), and `less <file>` denies are unchanged.
+
+### Fixes and Maintenance
+
+- Rewrote the `### grep/rg with file paths` section of [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) to document the new allow-in-safe-zones policy (Allowed: relative, workspace, `/tmp`, `~/.claude` subtrees; Blocked: out-of-zone absolute, bare `~`, `..`, abs-binary, `egrep`/`fgrep`). Updated the `## Bash-side reference` preamble + grep row, the `### Pipe-only commands` table (dropped grep/rg, kept egrep/fgrep), the `## Best practices` and `## Common patterns` search guidance (search directly with `grep`/`rg` on a relative path; Grep tool unavailable), and the `Search files` / `Tool name as Bash` rows.
+- Updated `tests/command_decisions.tsv`: flipped 11 stale rows from `deny` to `allow`/`passthrough` under the new policy (`/tmp` and relative grep/rg, `env grep` relative; `command grep` -> passthrough), and added explicit new-behavior fixtures -- relative allow (`grep -n foo src/main.ts`, `rg pattern docs/`), out-of-zone deny (`grep foo /etc/hosts`, `rg pattern /usr/lib/x`), traversal/home deny (`grep foo ../secrets.txt`, `rg foo ~/Documents/x`), and per-config 4-col workspace-absolute + `~/.claude` allow rows. Decision corpus runs 2112 passing rows across both configs; full `pytest tests/` 207 green.
+- Corrected the grep/rg recovery guidance in [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md). The `### grep/rg with file paths` section previously listed two distinct recovery paths joined by a semicolon ("`git ls-files` then Read tool on targets; piped `grep`/`rg` on bounded stdout"), which an agent merged into the wrong idiom `git ls-files | grep` (filters filenames, not contents) and the overstated claim "pipeline `... | grep` always OK". Rewrote the section to split recovery by intent: content search across many files via `git ls-files <pathspec> | xargs grep PAT` (the whitelisted `xargs grep|egrep|fgrep|rg` pipeline leaf, allowed end-to-end), file inspection via `git ls-files` + Read, broad search via `_temp.py`. Added the explicit caveats that `... | grep pat` filters stdout (not a file search), `git ls-files | grep` filters filenames, `... | grep pat file` (file arg) is still denied, and a denied producer denies the whole chain.
+- Documented three grep-adjacent rules that shipped 2026-05-15 (live in `example.toml`) but were missing from the guide: the `git ls-files | xargs grep PAT` pipeline-leaf allow (`example.toml:1075-1089`); the `pcregrep`/`ack`/`ag` file-path deny mirroring grep/rg (`example.toml:667-672`); and the `less <file>` deny routing to the Read tool (`example.toml:660-665`). Folded the latter two into the grep/rg Blocked block.
+- Aligned the top `## Bash-side reference` grep row with the new `xargs grep` content-search recovery so the summary table no longer re-seeds the filename-vs-contents confusion. Collapsed the duplicated recovery paragraph in `### git grep` to a cross-link anchor (`#grep-recovery`). Compressed the four-paragraph header preamble to a single paragraph. Updated the stale `_Last updated_` stamp from 2026-05-21 to 2026-05-29 02:20 UTC (true UTC edit time; local date 2026-05-28).
+
+### Developer Tests and Notes
+
+- `pytest tests/test_markdown_links.py tests/test_ascii_compliance.py` runs 2/2 green after the doc edits (new `#grep-recovery` anchor and cross-link verified).
+- Full `pytest tests/` green (213, including the new size guard); `tools/run_command_decisions.py` 2112 rows pass across both configs; `tests/test_toml_parse.py` parity holds after the `SAFE_ABS_ZONES` variable addition.
+
 ## 2026-05-22
 
 ### Additions and New Features

@@ -123,6 +123,13 @@ WORKSPACE_ROOT = "projects"
 # command_exclude_regex (${NO_TRAVERSAL}), not by this pattern.
 FIND_SAFE_PATH_ARG = "(?:\\.(?:/[A-Za-z0-9_./-]+)?|~/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|/(?:private/)?tmp(?:/[A-Za-z0-9_./-]+)?|/Users/[^/\\s]+/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|[$]HOME/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills|plugins|plans|projects)(?:/[A-Za-z0-9_./-]+)?|[A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_./-]+)?)"
 
+# Absolute safe-zone roots: workspace (tilde, /Users, $HOME), /tmp, and the
+# narrow ~/.claude agent-config subtrees. These mirror the ABSOLUTE branches of
+# FIND_SAFE_PATH_ARG (no bare-relative branch -- a relative path never triggers
+# the grep/rg absolute-path deny, so the exclude only needs the absolute zones).
+# Used by the grep/rg absolute-path deny exclude below.
+SAFE_ABS_ZONES = "/(?:private/)?tmp|~/${WORKSPACE_ROOT}|/Users/[^/\\s]+/${WORKSPACE_ROOT}|[$]HOME/${WORKSPACE_ROOT}|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills|plugins|plans|projects)"
+
 # ===================================================================
 # DENY rules (checked first, before allow rules)
 # Every deny rule MUST have a reason field to steer Claude to a better path.
@@ -599,17 +606,32 @@ reason = "Invoke the Read tool: file_path=<path>, with optional offset and limit
 # path. Real pipelines are already split by the decomposer, so a bare '|' here
 # is always inside a quoted pattern, never a pipe boundary. The '>' exclusion
 # stays so a stdin filter with a redirect ('grep pat > /tmp/out') is not denied.
+# grep/rg with a CWD-relative path argument is ALLOWED (falls through to the
+# SAFE_CMDS allow). Deny only when the path argument is absolute (`/...`), home
+# (`~`), or uses `..` traversal -- those escape the current working directory.
+# The trailing `\s(/|~|\.\.)` matches a space then an absolute/home/traversal
+# token. Pipeline leaves (`... | grep pat`, no file arg) never match. Char class
+# is [^>] so a redirect is not treated as a path and grep `|` alternation in the
+# pattern does not stop the scan.
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(grep|egrep|fgrep|rg)\\b[^>]*/"
-reason = "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `grep` and `rg` are good tools and stay allowed as pipeline filters on already-bounded output (`git ls-files | grep pat`, `git ls-files | rg pat`, `git diff | grep pat`). For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `grep`, `egrep`, `fgrep`, `rg`, and absolute-path forms (`/usr/bin/grep`, `/opt/homebrew/.../grep`) are denied only with a file path argument -- scope-control rule, not anti-grep."
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(grep|rg)\\b[^>]*\\s(/|~|\\.\\.)"
+command_exclude_regex = "\\s(${SAFE_ABS_ZONES})(?:/|\\s|$)"
+reason = "Use a relative path or a workspace path (e.g. `grep pat src/file.py`, `rg pat ~/<workspace>/repo/`). Relative, workspace (`~/<workspace>/...`, `/Users/<me>/<workspace>/...`), and `/tmp` paths are allowed. A path outside those safe zones -- arbitrary absolute (`/etc/...`), bare `~`, or `..` traversal -- is rejected for scope control: it can flood context with an unbounded scan. To read one known file by an out-of-zone absolute path use the Read tool. Pipeline filters on bounded stdout stay allowed (`... | grep pat`)."
+
+# egrep/fgrep are deprecated. Deny the file-path form outright (no relative
+# carve-out, unlike grep/rg) and steer to `grep -E` / `grep -F`.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(egrep|fgrep)\\b[^>]*/"
+reason = "`egrep` and `fgrep` are deprecated; use `grep -E` or `grep -F` instead. With a file path argument they are rejected -- switch to `grep` with a CWD-relative path, or pipe bounded stdout (`... | grep pat`)."
 
 # Deny absolute-path grep/rg unconditionally. Calling via absolute path
 # (/usr/bin/grep, /opt/homebrew/bin/rg) is a deliberate bypass attempt.
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}/(?:[^/\\s]+/)+(grep|egrep|fgrep|rg)\\b"
-reason = "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `grep` and `rg` are good tools and stay allowed as pipeline filters on already-bounded output (`git ls-files | grep pat`, `git ls-files | rg pat`, `git diff | grep pat`). For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `grep`, `egrep`, `fgrep`, `rg`, and absolute-path forms (`/usr/bin/grep`, `/opt/homebrew/.../grep`) are denied only with a file path argument -- scope-control rule, not anti-grep."
+reason = "Use the bare PATH form (`grep ...`, `rg ...`) rather than an absolute binary path (`/usr/bin/grep`, `/opt/homebrew/bin/rg`). Relative `grep`/`rg` is allowed; calling via absolute binary path is rejected to keep PATH discipline visible and avoid bypass shapes."
 
 # Deny absolute-path forms of safe utilities. Steer to bare PATH form.
 # Passthrough audit (2026-05-15) showed /usr/bin/<tool> variants falling
