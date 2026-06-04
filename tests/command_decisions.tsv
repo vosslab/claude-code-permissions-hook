@@ -1520,3 +1520,18 @@ deny	git rebase -i HEAD~3
 deny	git rebase main
 passthrough	git rebase --abort
 allow	NODE_OPTIONS=--disable-warning=DEP0205 node --test tests/x.mjs
+# 2026-06-03 passthrough audit: inert cmd-sub chars in a single-quoted search
+# PATTERN must allow; quoted/escaped-paren find PATH roots must allow; real
+# unquoted cmd-sub in a grep/rg/find leaf still denies; grep flags never block.
+allow	grep -n foo src/file
+allow	grep -rn 'foo' src/ tests/
+allow	grep -n '`references/' src/x.md
+allow	grep '${.*}__${' src/main.ts
+allow	rg -n '`x' src/
+allow	find src/'(0)concepts' -name '*.mdx'
+allow	find ./routes/\(2\)guides -name '*.mdx' -type f | xargs wc -l
+allow	find . \( -name '*.md' -o -name '*.mdx' \) | sort
+deny	grep `whoami` src/x
+deny	grep $(cat /etc/passwd) src/x
+deny	find . -name x`evil`
+deny	find '../secrets' -name '*.key'

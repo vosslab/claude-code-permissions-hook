@@ -157,17 +157,20 @@ def _parse_input(tool: str, raw: str) -> dict:
 
 
 #============================================
-def run_row(row: dict, filter_str: str) -> tuple:
+def run_row(row: dict, filter_str: str) -> tuple[int, int, int, list[str]]:
 	"""Run a single parsed TSV row against all of its configs.
 
-	Returns (passes, fails, skipped). Each config counts independently.
+	Returns (passes, fails, skipped, fail_lines). fail_lines is a list of
+	human-readable mismatch summaries reprinted at the end of the run so the
+	failures are visible without scrolling back through the OK output.
 	"""
 	# Filter: substring match against the JSON-rendered tool_input.
 	display = row["tool"] + " " + json.dumps(row["tool_input"])
 	if filter_str and filter_str not in display:
-		return (0, 0, 1)
+		return (0, 0, 1, [])
 	passes = 0
 	fails = 0
+	fail_lines = []
 	for cfg in row["configs"]:
 		got, _reason = decide_with(cfg, row["tool"], row["tool_input"])
 		label = os.path.basename(cfg)
@@ -177,10 +180,14 @@ def run_row(row: dict, filter_str: str) -> tuple:
 				f"{row['tool']} {json.dumps(row['tool_input'])[:80]}")
 			passes += 1
 		else:
-			print(f"{RED}FAIL [{label:32s}] expect={expected:11s} got={got:11s} :: "
-				f"{row['tool']} {json.dumps(row['tool_input'])[:80]}{RESET}")
+			# Build the line once so the inline print and the end-of-run
+			# summary stay identical.
+			summary = (f"[{label:32s}] expect={expected:11s} got={got:11s} :: "
+				f"{row['tool']} {json.dumps(row['tool_input'])[:80]}")
+			print(f"{RED}FAIL {summary}{RESET}")
+			fail_lines.append(summary)
 			fails += 1
-	return (passes, fails, 0)
+	return (passes, fails, 0, fail_lines)
 
 
 #============================================
@@ -250,15 +257,17 @@ def main() -> int:
 	total_pass = 0
 	total_fail = 0
 	total_skip = 0
+	all_fail_lines = []
 	with open(TSV, "r", encoding="utf-8") as handle:
 		for raw in handle:
 			row = parse_row(raw)
 			if row is None:
 				continue
-			p, f, s = run_row(row, filter_str)
+			p, f, s, fail_lines = run_row(row, filter_str)
 			total_pass += p
 			total_fail += f
 			total_skip += s
+			all_fail_lines.extend(fail_lines)
 
 	print()
 	if total_fail == 0:
@@ -269,6 +278,10 @@ def main() -> int:
 	print(f"{BG_RED}   FAILURE: {total_fail} mismatches "
 		f"(passed={total_pass}, skipped={total_skip})  {RESET}")
 	print(f"{BG_RED} ============================================================ {RESET}")
+	# Reprint every mismatch so failures are visible at the end of the run
+	# without searching back through the OK lines.
+	for line in all_fail_lines:
+		print(f"{RED}FAIL {line}{RESET}")
 	return 1
 
 

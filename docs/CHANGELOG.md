@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-06-03
+
+### Additions and New Features
+
+- Added `has_active_cmd_sub()` to `src/decomposer.rs`: a single-quote / backslash-aware scanner (mirrors `extract_command_substitutions`) that returns true only for an UNQUOTED, unescaped backtick or `$(`. A substitution character inside `'...'` is inert and returns false. Unit test `test_has_active_cmd_sub` covers quoted/unquoted/escaped/`${}` cases.
+- Added a structural command-substitution guard for search commands in `src/lib.rs` (`is_search_cmd` + `has_active_cmd_sub`): a `grep`/`rg`/`find` leaf with real (unquoted) command substitution is denied with a steering message; quoted substitution characters no longer block. Scoped to search commands (user decision, passthrough audit 2026-06-03) to bound blast radius rather than replacing `${NO_CMD_SUB}` across all ~30 rules.
+- Added a dedicated `grep|rg` allow rule (both configs) with NO `command_exclude_regex`, bare-name anchored `^(grep|rg)\b` to mirror the `SAFE_CMDS` allow shape. The shared `SAFE_CMDS` allow still excludes `${NO_CMD_SUB}` (not single-quote-aware); this rule re-allows searches whose PATTERN holds a quoted backtick/`$(`/`${`. Out-of-zone paths are still denied first by the grep/rg path deny; real cmd-sub by the structural guard.
+- `tools/run_command_decisions.py` now reprints every mismatch after the FAILURE banner, so failures are visible at the end of a run without scrolling back through the OK lines.
+
+### Behavior or Interface Changes
+
+- `grep`/`rg` with a literal backtick, `$(`, or `${` inside a single-quoted PATTERN now AUTO-ALLOWS (was passthrough): `grep -n '`references/' src/x`, `grep '${.*}__${' src/main.ts`. This completes the quote-aware backtick handling deferred on 2026-05-29.
+- `find` with quoted or backslash-escaped path SEGMENTS now auto-allows: `FIND_SAFE_PATH_ARG` segment char class extended from `[A-Za-z0-9_./-]` to include `'"\()` (both configs), so SolidJS-style route dirs named `(0)concepts` match whether written `'(0)concepts'` or `\(0\)concepts`. `..` traversal stays denied.
+- Clarified that grep/rg flags (`-n`, `-rn`, `-r`, `--include=`) never block; the prior passthroughs were the backtick-in-pattern issue, not flags.
+
+### Fixes and Maintenance
+
+- Removed `${NO_CMD_SUB}` from the `find` allow exclude and the `find` traversal/cmd-sub deny (both configs); the structural guard now owns cmd-sub denial for find, so quoted substitution chars in a find path no longer false-deny.
+- Added 12 fixtures to `tests/command_decisions.tsv`: grep flag allows, single-quoted backtick/`${}` allows, quoted/escaped-paren find path allows, grouping `\( ... \)`, plus negative guards (unquoted backtick/`$(` deny, `..` traversal deny). Full suite green at 2202 passing.
+- Post-review fixes (audit-code-reviewer): `has_active_cmd_sub` narrowed `pub` -> `pub(crate)` (only intra-crate caller); added `test_is_search_cmd` unit test; corrected a stale A1 comment in both configs that still claimed `${NO_CMD_SUB}` was in the find allow exclude; fixed broken backtick code spans and a now-inaccurate "command substitution is blocked" blanket in `docs/CLAUDE_HOOK_USAGE_GUIDE.md`; annotated the grep/rg-shadows-SAFE_CMDS ordering near `SEARCH_CMDS` in both configs.
+
+### Removals and Deprecations
+
+- Trimmed redundancy from `docs/CLAUDE_HOOK_USAGE_GUIDE.md` (which loads into `CLAUDE.md` context every session and was near the 40000-char `tests/test_usage_guide_size.py` cap). Replaced the "Common patterns" Wrong/Right table (a full restatement of denies documented in detail above) with a short rules-of-thumb pointer, deduplicated the find "Not in this pass" predicate list (it appeared twice), and tightened find-section prose. No rule information lost; net ~1.6 KB smaller, leaving real headroom under the cap.
+
+### Decisions and Failures
+
+- Kept the cmd-sub fix SCOPED to `grep`/`rg`/`find` rather than generalizing `has_active_cmd_sub` to replace `${NO_CMD_SUB}` on all Bash rules (user decision). The general form is cleaner (DRY, no `is_search_cmd` special case) but would flip non-search `$(...)` cases (e.g. `echo $(date)`) from passthrough to deny and require a full torture-suite re-baseline. Search commands are the only place the false positive bites, so the scoped fix is the long-term-cheaper choice for now.
+- Regression caught during the run: the first draft of the new grep allow used `^${TOOL_PREFIX}${TOOL_PATH}(grep|rg)\b`, which matched the `command ` wrapper and flipped `command grep ... ` from passthrough to allow. Fixed by anchoring bare `^(grep|rg)\b`, matching the existing `SAFE_CMDS` allow shape. The end-of-run failure summary (added this day) surfaced it immediately.
+- Passthrough audit of `/tmp/claude-passthrough.json` (6 records) drove these changes; all 6 were legitimate read-only searches in safe zones (workspace, `~/.claude/plans`, relative), stalling on the two rule gaps above. None malicious.
+
+### Developer Tests and Notes
+
+- Verified via `./config_test.sh` (cargo build + cargo test + `run_command_decisions.py` against BOTH live and example configs): 86 lib tests + 2202 fixture decisions pass. New `test_has_active_cmd_sub` lives under `cargo test --lib`.
+
 ## 2026-05-29
 
 ### Additions and New Features

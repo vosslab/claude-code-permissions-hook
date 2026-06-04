@@ -22,6 +22,10 @@ protected_refs = ["refs/heads/main", "refs/heads/master"]
 # awk is intentionally excluded -- denied entirely (steered to git ls-files + Read, piped grep/rg, or _temp.py).
 TEXT_CMDS = "cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs"
 # Search and query (find content within text or structured data)
+# Note: bare `grep`/`rg` leaves match the dedicated `^(grep|rg)\b` allow rule
+# (which has no ${NO_CMD_SUB} exclude) BEFORE the ${SAFE_CMDS} catch-all, so the
+# grep/rg members here are reachable via SAFE_CMDS only through the absolute-path
+# allow. If you add an exclude to the dedicated rule, mirror it for grep/rg here.
 SEARCH_CMDS = "grep|jq|rg"
 # Formatting and layout (presentation of text)
 FORMAT_CMDS = "column|expand|fmt|fold|nl|paste|unexpand"
@@ -132,7 +136,10 @@ WORKSPACE_ROOT = "projects"
 #   - any path containing shell glob chars (*, ?, [) in any segment
 # Note: `..` path traversal is excluded by D5 deny and by A1's
 # command_exclude_regex (${NO_TRAVERSAL}), not by this pattern.
-FIND_SAFE_PATH_ARG = "(?:\\.(?:/[A-Za-z0-9_./-]+)?|~/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|/(?:private/)?tmp(?:/[A-Za-z0-9_./-]+)?|/Users/[^/\\s]+/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|[$]HOME/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./-]+)?|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills|plugins|plans|projects)(?:/[A-Za-z0-9_./-]+)?|[A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_./-]+)?)"
+# Segment char class includes `()'"\` so quoted or escaped path segments
+# (e.g. SolidJS route dirs named `(0)concepts`, written `'(0)concepts'` or
+# `\(0\)concepts`) match. `..` traversal is still excluded by D5 / A1.
+FIND_SAFE_PATH_ARG = "(?:\\.(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|~/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|/(?:private/)?tmp(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|/Users/[^/\\s]+/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|[$]HOME/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills|plugins|plans|projects)(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|[A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_./()'\"\\\\-]+)?)"
 
 # Absolute safe-zone roots: workspace (tilde, /Users, $HOME), /tmp, and the
 # narrow ~/.claude agent-config subtrees. These mirror the ABSOLUTE branches of
@@ -588,24 +595,27 @@ reason = "Use `find <safe-root> -name <pattern>` or `find <safe-root> -type f` f
 # than the user-approval dialog.
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\b.*(\\.\\.(/|\\s|$)|${NO_CMD_SUB})"
-reason = "Use a path inside the working tree without `..` traversal and avoid `$(...)` or backticks. `find` with path traversal (`..`) or command substitution is denied because it escapes the intended search scope or hides shell evaluation."
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\b.*\\.\\.(/|\\s|$)"
+reason = "Use a path inside the working tree without `..` traversal. `find` with path traversal (`..`) is denied because it escapes the intended search scope. (Command substitution in a find leaf is denied separately by the structural cmd-sub guard.)"
 
 # A1 -- allow read-only `find` in safe path zones. Path arg must match
 # ${FIND_SAFE_PATH_ARG}; the exclude regex mirrors D1a+D1b predicates
-# plus D5 traversal/cmd-sub exclusions so unsupported predicates fail
+# plus the ${NO_TRAVERSAL} exclusion so unsupported predicates fail
 # the allow *and* match a deny (clearer than passthrough). The
-# ${NO_TRAVERSAL} and ${NO_CMD_SUB} entries here are intentional
-# belt-and-suspenders overlap with D5: D5 fires first (deny precedence)
-# and provides the steering message, this exclude prevents A1 from
-# inadvertently allowing a traversal/cmd-sub leaf if D5's regex ever
-# misses an edge case. The trailing path terminator is `(?:\\s|$)`
+# ${NO_TRAVERSAL} entry here is intentional belt-and-suspenders overlap
+# with D5: D5 fires first (deny precedence) and provides the steering
+# message, this exclude prevents A1 from inadvertently allowing a
+# traversal leaf if D5's regex ever misses an edge case. Command
+# substitution is no longer excluded here -- the structural cmd-sub guard
+# (src/lib.rs is_search_cmd + has_active_cmd_sub) denies a find leaf with
+# real (unquoted) `$(...)`/backtick, so quoted substitution characters in
+# a path no longer false-deny. The trailing path terminator is `(?:\\s|$)`
 # (not `\\b`) because the safe path arg can end in `.`, `/`, or `-`,
 # all of which are non-word chars where `\\b` would fail.
 [[allow]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}find\\s+(-[A-Za-z]+(\\s+\\S+)?\\s+)*${FIND_SAFE_PATH_ARG}(?:\\s|$)"
-command_exclude_regex = "\\s-(delete|exec|execdir|ok|okdir|fprintf|fprint|fls|printf|print0|prune|newer|mtime|atime|user|group|perm|size|links|inum|samefile|fstype|mount|xdev|regex|iregex)\\b|${NO_CMD_SUB}|${NO_TRAVERSAL}"
+command_exclude_regex = "\\s-(delete|exec|execdir|ok|okdir|fprintf|fprint|fls|printf|print0|prune|newer|mtime|atime|user|group|perm|size|links|inum|samefile|fstype|mount|xdev|regex|iregex)\\b|${NO_TRAVERSAL}"
 
 # Deny `git grep`. Pattern: agents who hit the grep deny look for a Bash
 # escape hatch and reach for `git grep`, which would keep every search
@@ -661,6 +671,21 @@ tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(grep|rg)\\b[^>]*\\s(/|~|\\.\\.)"
 command_exclude_regex = "\\s(${SAFE_ABS_ZONES})(?:/|\\s|$)"
 reason = "Use a relative path or a workspace path (e.g. `grep pat src/file.py`, `rg pat ~/<workspace>/repo/`). Relative, workspace (`~/<workspace>/...`, `/Users/<me>/<workspace>/...`), and `/tmp` paths are allowed. A path outside those safe zones -- arbitrary absolute (`/etc/...`), bare `~`, or `..` traversal -- is rejected for scope control: it can flood context with an unbounded scan. To read one known file by an out-of-zone absolute path use the Read tool. Pipeline filters on bounded stdout stay allowed (`... | grep pat`)."
+
+# Allow grep/rg by name (path zone is enforced by the deny rules above, which
+# run first). This rule deliberately has NO command_exclude_regex: the shared
+# SAFE_CMDS allow excludes ${NO_CMD_SUB}, which is not single-quote-aware and
+# wrongly blocked searches whose PATTERN contains a literal backtick or `$(`
+# inside quotes (e.g. `grep '`references/' file`, `grep '${.*}' file`). Real,
+# unquoted command substitution in a grep/rg leaf is denied first by the
+# structural cmd-sub guard (src/lib.rs is_search_cmd + has_active_cmd_sub), and
+# out-of-zone paths are denied by the grep/rg path deny above. Bare-name anchor
+# only (no ${TOOL_PREFIX}/${TOOL_PATH}), mirroring the SAFE_CMDS allow shape so a
+# `command grep`/`env grep` wrapper or absolute-path binary keeps its prior
+# passthrough/deny behavior.
+[[allow]]
+tool = "Bash"
+command_regex = "^(grep|rg)\\b"
 
 # egrep/fgrep are deprecated. Deny the file-path form outright (no relative
 # carve-out, unlike grep/rg) and steer to `grep -E` / `grep -F`.

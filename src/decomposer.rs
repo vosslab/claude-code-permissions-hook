@@ -244,6 +244,57 @@ fn extract_command_substitutions(s: &str) -> Vec<String> {
     results
 }
 
+/// Returns true if `leaf` contains an ACTIVE (shell-evaluated) command
+/// substitution: an unescaped, non-single-quoted backtick or `$(`.
+///
+/// A backtick or `$(` INSIDE single quotes is a literal regex/path char (for
+/// example a grep PATTERN written 'BACKTICK foo' or a path named '$(x)') and
+/// returns false. `${VAR}` (brace expansion, no `(`) is never a substitution
+/// and also returns false. Double quotes do NOT protect -- the shell expands
+/// substitutions inside "...". Mirrors the single-quote / backslash scanning in
+/// `extract_command_substitutions`.
+///
+/// Used by the search-command (grep/rg/find) cmd-sub guard so that quoted
+/// substitution characters in a search pattern no longer force passthrough,
+/// while real (unquoted) command substitution is still denied.
+pub(crate) fn has_active_cmd_sub(leaf: &str) -> bool {
+    let bytes = leaf.as_bytes();
+    let mut i = 0;
+    let mut in_single = false;
+    while i < bytes.len() {
+        let c = bytes[i];
+        // Single-quoted regions are literal: only a closing `'` ends them.
+        if in_single {
+            if c == b'\'' {
+                in_single = false;
+            }
+            i += 1;
+            continue;
+        }
+        // Backslash escapes the next byte.
+        if c == b'\\' {
+            i += 2;
+            continue;
+        }
+        // Open a single-quoted region.
+        if c == b'\'' {
+            in_single = true;
+            i += 1;
+            continue;
+        }
+        // Unquoted backtick is a (legacy) command substitution.
+        if c == b'`' {
+            return true;
+        }
+        // Unquoted `$(` opens a command substitution.
+        if c == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'(' {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 fn extract_from_compound_command(cmd: &ast::CompoundCommand) -> Vec<String> {
     match cmd {
         ast::CompoundCommand::BraceGroup(bg) => extract_from_compound_list(&bg.list),
@@ -558,6 +609,24 @@ mod tests {
         // ${VAR} is NOT a command substitution, only $() is
         let result = extract_command_substitutions("echo ${HOME}/file");
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_has_active_cmd_sub() {
+        // Unquoted substitutions are active.
+        assert!(has_active_cmd_sub("grep `whoami` src/x"));
+        assert!(has_active_cmd_sub("grep $(cat /etc/passwd) src/x"));
+        assert!(has_active_cmd_sub("find . -name x\"$(evil)\""));
+        // Single-quoted substitution chars are inert (literal pattern/path).
+        assert!(!has_active_cmd_sub("grep '`references/' src/x.md"));
+        assert!(!has_active_cmd_sub("grep '$(cat x)' src/x"));
+        assert!(!has_active_cmd_sub("find src/'(0)concepts' -name '*.mdx'"));
+        // Inert here because the token is single-quoted; `${` is also not `$(`.
+        assert!(!has_active_cmd_sub("grep '${.*}__${' src/main.ts"));
+        // ${VAR} is brace expansion (no `(`), not a substitution, even unquoted.
+        assert!(!has_active_cmd_sub("echo ${HOME}/x"));
+        // Backslash-escaped backtick is literal.
+        assert!(!has_active_cmd_sub("grep \\`x src/x"));
     }
 
     #[test]

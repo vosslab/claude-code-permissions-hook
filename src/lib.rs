@@ -66,6 +66,23 @@ pub fn process_hook_input(config_path: &Path, input: &HookInput) -> Result<HookR
     process_hook_input_with_config(&config, input)
 }
 
+/// Returns true if the first real token of a Bash leaf is `grep`, `rg`, or
+/// `find` (ignoring leading `command`/`env` words and `VAR=val` prefixes, and
+/// any absolute path to the binary). Used to scope the structural cmd-sub guard
+/// to search commands.
+fn is_search_cmd(leaf: &str) -> bool {
+    for tok in leaf.split_whitespace() {
+        // Skip wrapper words and env-var assignment prefixes.
+        if tok == "command" || tok == "env" || tok.contains('=') {
+            continue;
+        }
+        // Basename of an absolute path (e.g. /usr/bin/grep -> grep).
+        let name = tok.rsplit('/').next().unwrap_or(tok);
+        return matches!(name, "grep" | "rg" | "find");
+    }
+    false
+}
+
 /// Process a hook input against pre-loaded config.
 ///
 /// Useful when you want to load the config once and process multiple inputs,
@@ -112,6 +129,20 @@ fn process_hook_input_with_rules_and_context(
 
             // Deny check: if ANY sub-command matches ANY deny rule, deny everything
             for sub_cmd in &sub_commands {
+                // Structural cmd-sub guard for search commands. The grep/rg/find
+                // allow rules no longer exclude on the NO_CMD_SUB regex (which is
+                // not single-quote-aware and wrongly blocked quoted patterns like
+                // `grep '`pat' file`). Real, unquoted command substitution inside a
+                // grep/rg/find leaf is denied here instead.
+                if is_search_cmd(sub_cmd) && decomposer::has_active_cmd_sub(sub_cmd) {
+                    return HookResult::deny(
+                        "Command substitution (backtick or `$(...)`) in a grep/rg/find \
+                         command is denied: it hides shell evaluation in a search. Single-quote \
+                         the pattern if the characters are literal (`grep '`foo' file`), or run \
+                         the substitution as a separate, reviewed command."
+                            .to_string(),
+                    );
+                }
                 let synthetic = input.with_command(sub_cmd);
                 if let Some(reason) = check_rules_with_protected_branches(deny_rules, &synthetic, protected_branches) {
                     return HookResult::deny(reason);
@@ -192,4 +223,27 @@ pub fn load_config(config_path: &Path) -> Result<(Config, Vec<Rule>, Vec<Rule>)>
     let config = Config::load_from_file(config_path).context("Failed to load configuration")?;
     let (deny_rules, allow_rules) = config.compile_rules().context("Failed to compile rules")?;
     Ok((config, deny_rules, allow_rules))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_search_cmd() {
+        // Bare search commands.
+        assert!(is_search_cmd("grep -n foo src/x"));
+        assert!(is_search_cmd("rg pat src/"));
+        assert!(is_search_cmd("find . -name '*.py'"));
+        // Absolute-path binary resolves by basename.
+        assert!(is_search_cmd("/usr/bin/grep foo src/x"));
+        // Wrapper words and env-var prefixes are skipped.
+        assert!(is_search_cmd("command grep foo src/x"));
+        assert!(is_search_cmd("env grep foo src/x"));
+        assert!(is_search_cmd("LC_ALL=C grep foo src/x"));
+        // Non-search commands.
+        assert!(!is_search_cmd("cat src/x"));
+        assert!(!is_search_cmd("echo hi"));
+        assert!(!is_search_cmd(""));
+    }
 }
