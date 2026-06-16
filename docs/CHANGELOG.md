@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-06-16
+
+### Additions and New Features
+
+- Added a `swift` allow rule (both configs) modeled on the `^cargo\b` allow: the whole SwiftPM dev loop auto-allows (`swift build`, `swift test`, `swift run`, `swift package <sub>`, `swift --version`). `command_exclude_regex` excludes inline-eval (`-e`/`--eval`) and the registry-mutating `package-registry login|logout|set` subcommands. Like `cargo build`, `swift build`/`swift test` fetch dependencies over the network -- the same accepted trade-off.
+- Added a `sips -g` read-only allow rule (both configs): `sips -g <prop> ...` image-metadata queries auto-allow regardless of path because the `-g`/`--getProperty` form never writes. Any write/convert flag (`-s`, `-z`, `--resample*`, `--crop*`, `--pad*`, `-r`, `-f`, `-o`/`--out`, `-d`/`--delete*`, `-i`/`--addIcon`, `-m`/`--matchTo*`, `-e`/`--embedProfile`) disqualifies the leaf, leaving it at passthrough. For transforms, `magick` in `/tmp` is the steer.
+
+### Behavior or Interface Changes
+
+- **`swift -e` / `swift --eval` inline code is now denied** (both configs), steered to a `_temp.swift` file or running `swift build`/`swift test` directly. Same rule shape as `python -c` and `node -e` (`^${TOOL_PREFIX}${TOOL_PATH}swift\s+(-\S+\s+)*(-e|--eval)\b`), covering bare, flag-prefixed, `command`/`env`, and absolute-path forms.
+- **`xcode-select` is now denied** (both configs), steered to running `swift` directly. In the audit it appeared only as toolchain archaeology (`xcode-select -p`) while a `swift test` was stalling. `xcrun` is unaffected (it stays in `SYS_CMDS`); the deny anchors `xcode-select\b` so it never matches `xcrun`.
+
+### Fixes and Maintenance
+
+- Added 38 swift, 8 xcode-select, and 10 sips fixtures (plus xcrun negative guards) to `tests/command_decisions.tsv`, including the real chained shapes from the audit (`cd /tmp/x && swift test 2>&1; echo "EXIT: $?"`). All green against both configs.
+
+### Decisions and Failures
+
+- Root-cause framing from the 2026-06-16 passthrough audit (43 records, 2 sessions): session B (`swift-usb-imager`, 39 records) was not 39 separate gaps -- it was one gap (no `swift` rule) plus downstream flailing. With `swift build`/`swift test` stalling, the agent did toolchain archaeology (`swift -e 'import XCTest'`, `otool -L .../Testing.framework`, `xcrun --find xctest`, `echo "EXIT: $?"`, `|| true`). Fixing the design (allow `swift`) removes the archaeology, so `otool`/`xcodebuild`/`swift -e` were deliberately NOT allowlisted (allowlisting debugging artifacts would bless the wrong behavior).
+- Chose a broad `^swift\b` allow + small exclude (mirroring `^cargo\b`) over an enumerated subcommand allowlist: the enumerated form is more precise but higher-maintenance and would re-stall the next legitimate subcommand.
+- `xcode-select` denied rather than allowlisted (user decision): it is a once-per-machine probe, not dev-loop work, and the audit showed it only as flailing. A `xcode-select -p; xcrun ...` chain denies as a whole because one leaf denies.
+- `sips` scoped to the read-only `-g` query form only (user decision): write/convert forms stay passthrough. `magick` was rejected as a steer for metadata reads -- it is `/tmp`-scoped (would also stall on the `~/Documents/ScreenShots` paths in the audit), an external dependency, and write-capable; native `sips -g` is the cleaner read-only path.
+
+### Developer Tests and Notes
+
+- Verified via `./config_test.sh` (cargo build --release + cargo test + `run_command_decisions.py` against BOTH live and example configs) and focused `run_command_decisions.py swift|xcode-select|sips|xcrun` runs.
+
 ## 2026-06-03
 
 ### Additions and New Features

@@ -87,6 +87,54 @@ allow	cargo test
 deny	cargo publish
 passthrough	cargo install foo
 
+# --- Swift (2026-06-16 audit) ---
+# Treated like cargo: the dev loop auto-allows; inline `-e`/`--eval` denies
+# (mirrors python -c / node -e). swift build/test fetch deps over the
+# network -- same accepted trade-off as cargo build.
+allow	swift build
+allow	swift test
+allow	swift run
+allow	swift --version
+allow	swift package --version
+allow	swift package resolve
+allow	swift package describe
+allow	swift package show-dependencies
+allow	swift test --list-tests
+allow	swift test --package-path /tmp/_swifttest_scaffold
+allow	swift build --package-path ~/nsh/swift-usb-imager
+# Real chained shapes from the audit: cd + swift test + echo EXIT. All three
+# leaves allow (cd, swift test, echo), so the chain allows. $? is not $(.
+allow	cd /tmp/_swifttest_scaffold && swift test 2>&1; echo "EXIT: $?"
+allow	cd /Users/vosslab/nsh/swift-usb-imager && swift build 2>&1
+# Inline Swift denied outright (mirrors python -c / node -e). Recovery:
+# write _temp.swift or run swift build/test directly.
+deny	swift -e 'import Foundation; print("ok")'
+deny	swift --eval "import XCTest; print(1)"
+deny	command swift -e 'print(1)'
+deny	/usr/bin/swift -e 'print(1)'
+deny	swift -O -e 'print(1)'
+# package-registry mutation stays out of the auto-allow (excluded).
+passthrough	swift package-registry login https://example.com
+
+# --- xcode-select deny / xcrun still allowed (2026-06-16 audit) ---
+# xcode-select was toolchain archaeology around a stalled swift test.
+deny	xcode-select -p
+deny	xcode-select --install
+deny	command xcode-select -p
+# Chain denies because one leaf (xcode-select) denies.
+deny	xcode-select -p; xcrun --sdk macosx --show-sdk-path
+# Negative guard: xcrun alone is unaffected (already in SYS_CMDS).
+allow	xcrun --sdk macosx --show-sdk-path
+allow	xcrun --find xctest
+
+# --- sips read-only query allow / write forms passthrough ---
+allow	sips -g pixelWidth -g pixelHeight -g format file.png
+allow	sips -g pixelWidth -g pixelHeight ~/Documents/ScreenShots/shot.png
+# Write/convert forms are NOT allowed (fall through to passthrough).
+passthrough	sips -z 100 100 in.png
+passthrough	sips -s format jpeg in.png --out out.jpg
+passthrough	sips -g pixelWidth in.png -s formatOptions low
+
 # --- bash -c / heredoc / loops ---
 deny	bash -c "echo x"
 deny	bash -lc "source && python3 ..."

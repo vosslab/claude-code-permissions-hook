@@ -771,6 +771,28 @@ tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}node\\s+(-\\S+\\s+)*(-e|--eval)\\b"
 reason = "Write the JS to a `_temp.mjs` file and run `node _temp.mjs`. `node -e` / `node --eval` with inline code is rejected because it is hard to lint and debug, and can hide command substitution or child_process calls. Same rule shape as `python -c`."
 
+# Deny `swift -e` / `swift --eval` inline Swift. Same risk profile as
+# `python -c` and `node -e`: arbitrary inline code, hard to lint/audit.
+# In the 2026-06-16 audit `swift -e 'import XCTest; print(...)'` was used
+# as toolchain archaeology while `swift build`/`test` were stalling; with
+# the swift allow rule in place, run `swift build`/`swift test` directly.
+# The `(-\S+\s+)*` clause allows interpreter flags before `-e`/`--eval`
+# (matches the python -c / node -e rule shape).
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}swift\\s+(-\\S+\\s+)*(-e|--eval)\\b"
+reason = "Write the Swift to a `_temp.swift` file and run it, or run `swift build`/`swift test` directly. `swift -e` / `swift --eval` with inline code is rejected because it is hard to lint and debug. Same rule shape as `python -c` / `node -e`."
+
+# Deny `xcode-select`. In the 2026-06-16 audit it appeared only as
+# toolchain archaeology (`xcode-select -p`) while the agent was flailing
+# around a stalled `swift test`. The toolchain is already configured;
+# probing it adds no real work. The `-select` suffix is anchored with `\b`
+# so this never matches `xcrun` (which stays allowed in SYS_CMDS).
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}xcode-select\\b"
+reason = "Do not probe the Xcode toolchain with `xcode-select`. It is already configured; run `swift build` / `swift test` directly. If a tool is genuinely missing it will fail loudly with a clear error, which is the correct feedback."
+
 # Deny `printf` used as a Write-tool replacement: redirected to a file
 # (`>`, `>>`) or piped to `tee`. Steers to the Write tool (or Edit for
 # appends). Bare `printf '...'` for stdout formatting stays allowed.
@@ -1088,6 +1110,35 @@ command_exclude_regex = "${NO_CMD_SUB}"
 tool = "Bash"
 command_regex = "^cargo\\b"
 command_exclude_regex = "\\b(publish|yank|login|logout|owner|install)\\b|${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: swift
+# SwiftPM build tool. Treated like cargo: allow the whole dev loop
+# (build/test/run/package/--version), exclude only the registry-mutating
+# package-registry subcommands and inline-eval. The `-e`/`--eval` inline
+# form is denied separately above (mirrors `python -c` / `node -e`); the
+# exclude here is a belt-and-suspenders guard so the broad `^swift\b`
+# allow never re-allows an inline-eval leaf. `swift build`/`swift test`
+# fetch dependencies over the network -- the same accepted trade-off as
+# `cargo build`.
+[[allow]]
+tool = "Bash"
+command_regex = "^swift\\b"
+command_exclude_regex = "(\\s|^)(-e|--eval)\\b|\\bpackage-registry\\s+(login|logout|set)\\b|${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: sips (read-only metadata query)
+# `sips -g <prop>` reads image properties (pixelWidth/Height, format) and
+# never writes. Allowed regardless of path because it is read-only by form.
+# Any write/convert flag disqualifies the leaf (it falls through to
+# passthrough): -s/--setProperty, -z/--resample*, --crop*/--pad*,
+# -r/--rotate, -f/--flip, -o/--out, -d/--delete*, -i/--addIcon,
+# -m/--matchTo*, -e/--embedProfile. For transforms, use `magick` in /tmp.
+# (2026-06-16 audit: 4 records were `sips -g` queries on ~/Documents.)
+[[allow]]
+tool = "Bash"
+command_regex = "^sips\\b.*(\\s|^)(-g|--getProperty)\\b"
+command_exclude_regex = "(\\s|^)(-s|--setProperty|-z|--resample\\w*|--cropToHeightWidth|--cropOffset|--padToHeightWidth|--padColor|-r|--rotate|-f|--flip|-o|--out|-d|--delete\\w*|-i|--addIcon|-m|--matchTo\\w*|-e|--embedProfile)\\b|${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
 # Bash: git allowlist
