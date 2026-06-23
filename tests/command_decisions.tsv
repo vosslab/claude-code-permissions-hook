@@ -36,6 +36,12 @@ allow	qpdf --linearize /tmp/in.pdf /tmp/out.pdf
 allow	gs -o /tmp/out.pdf -sDEVICE=pdfwrite /tmp/in.pdf
 passthrough	convert /Users/vosslab/foo.png /tmp/out.jpg
 passthrough	tesseract scan.png out
+# ffmpeg decode-only validation (-f null) reads any local path, writes nothing
+allow	ffmpeg -nostats -i TRACK_VIDEOS/x.mkv -map 0:v:0 -f null -
+allow	ffmpeg -i /Users/vosslab/nsh/repo/in.mkv -f null -
+allow	ffmpeg -i /tmp/in.wav -f null /dev/null
+# transcode to a non-/tmp output stays passthrough (matcher input-strip deferred)
+passthrough	ffmpeg -i /Users/vosslab/nsh/repo/in.mkv /tmp/out.mp4
 
 # --- rm exceptions (existing rules, regression coverage) ---
 allow	rm /tmp/scratch.txt
@@ -130,10 +136,93 @@ allow	xcrun --find xctest
 # --- sips read-only query allow / write forms passthrough ---
 allow	sips -g pixelWidth -g pixelHeight -g format file.png
 allow	sips -g pixelWidth -g pixelHeight ~/Documents/ScreenShots/shot.png
-# Write/convert forms are NOT allowed (fall through to passthrough).
+# Write/convert forms outside /tmp are NOT allowed (fall through to passthrough).
 passthrough	sips -z 100 100 in.png
 passthrough	sips -s format jpeg in.png --out out.jpg
 passthrough	sips -g pixelWidth in.png -s formatOptions low
+# Write/convert forms scoped to /tmp are allowed
+allow	sips -c 360 640 --cropOffset 0 720 /tmp/a.png --out /tmp/b.png
+allow	sips -z 100 100 /tmp/in.png --out /tmp/out.png
+allow	sips -s format jpeg /tmp/in.png --out /tmp/out.jpg
+allow	sips -g pixelWidth /tmp/x.png
+# A non-/tmp path on either side disqualifies the /tmp write allow
+passthrough	sips -c 600 1400 /tmp/e.png --out /Users/vosslab/x.png
+passthrough	sips -c 100 100 /Users/vosslab/a.png --out /tmp/b.png
+# workspace write stays passthrough today; the deferred Rust path-zone task will
+# flip /tmp-or-workspace media writes to allow (exact, no regex residual)
+passthrough	sips -c 600 1400 /tmp/e.png --out /Users/vosslab/nsh/x.png
+
+# --- built-binary execution (2026-06-23 audit): relative .build/ and target/{debug,release}/ ---
+allow	.build/debug/usbimager --version
+allow	.build/debug/usbimager verify /tmp/x.bin --sha512 deadbeef
+allow	.build/arm64-apple-macosx/debug/USBImagerApp --auto-exit=3
+allow	.build/arm64-apple-macosx/debug/USBImagerApp --auto-exit=3 --source /Users/vosslab/Downloads/x.iso
+allow	./.build/release/usbimager list
+allow	./target/release/cck-hook --help
+allow	target/debug/cck-hook --check
+allow	.build/debug/usbimager > /tmp/out.log 2>&1
+# command-substitution forms fail the NO_CMD_SUB exclude -> passthrough (no global cmd-sub deny)
+passthrough	$(swift build --show-bin-path)/USBImagerApp --auto-exit=3
+passthrough	.build/debug/usbimager $(whoami)
+# absolute build paths are not relative -> passthrough; `..` trips NO_TRAVERSAL -> passthrough
+passthrough	/Users/vosslab/nsh/repo/.build/debug/usbimager --version
+# bare variable assignment (no command) is denied by the existing assignment rule
+deny	BIN=.build/debug/usbimager
+passthrough	.build/../.build/debug/usbimager
+passthrough	.build/debug/usbimager ../x
+
+# --- plutil read-only forms (2026-06-23 audit) ---
+allow	plutil -lint Info.plist
+allow	plutil -lint /tmp/x.plist
+allow	plutil -convert json Info.plist -o -
+# convert-to-file forms mutate -> passthrough
+passthrough	plutil -convert json Info.plist
+passthrough	plutil -convert json Info.plist -o /tmp/out.json
+passthrough	plutil -convert binary1 Info.plist -o /Users/vosslab/x.plist
+
+# --- diskutil read-only verbs (2026-06-23 audit) ---
+allow	diskutil list
+allow	diskutil info -plist /dev/disk3
+allow	diskutil info /
+# destructive verbs stay passthrough (verb-scoped allow lists only list/info)
+passthrough	diskutil eraseDisk JHFS+ X /dev/disk9
+passthrough	diskutil partitionDisk /dev/disk9 1 GPT JHFS+ X R
+passthrough	diskutil unmountDisk /dev/disk3
+
+# --- perl in-place edit denied -> Edit tool (2026-06-23 audit) ---
+deny	perl -0pi -e 's/a/b/' main.swift
+deny	perl -pi -e 's/x/y/' file.txt
+deny	perl -i -pe 's/x/y/' file.txt
+deny	perl -i.bak -pe 's/x/y/' file.txt
+# plain perl forms unaffected
+allow	perl script.pl
+passthrough	perl -MTime::HiRes -e 'print time'
+
+# --- macOS GUI / process / dispatch steering (2026-06-23 audit) ---
+# screencapture: cmd-sub form denied, plain form allowed
+deny	screencapture -l $(osascript -e 'id of window 1') /tmp/x.png
+allow	screencapture /tmp/shot.png
+allow	screencapture -x /tmp/shot.png
+# osascript denied entirely
+deny	osascript -e 'tell app "Finder" to quit'
+deny	osascript -e 'tell application "System Events" to get name of every process'
+deny	osascript /tmp/script.scpt
+# claude CLI dispatch denied -> Agent tool
+deny	claude --model claude-sonnet-4-6 -p "do task"
+deny	claude -p "implement feature"
+deny	claude --print "x"
+# kill family denied -> graceful self-exit + pgrep (pgrep stays allowed)
+deny	kill 12345
+deny	kill -9 12345
+deny	kill -KILL 12345
+deny	pkill USBImagerApp
+deny	pkill -f USBImagerApp
+deny	killall USBImagerApp
+deny	killall -9 USBImagerApp
+allow	pgrep USBImagerApp
+allow	pgrep -l USBImagerApp
+# compound: the pkill leaf denies -> whole command denies (deny-wins)
+deny	pkill USBImagerApp 2>/dev/null; sleep 1; .build/debug/usbimager --auto-exit=3
 
 # --- bash -c / heredoc / loops ---
 deny	bash -c "echo x"
@@ -983,8 +1072,9 @@ allow	which /tmp/x
 # --- PROC_CMDS: no file-path denies ---
 allow	pgrep
 allow	pgrep /tmp/x
-allow	pkill
-allow	pkill /tmp/x
+# pkill removed from PROC_CMDS (2026-06-23 audit) -- now denied
+deny	pkill
+deny	pkill /tmp/x
 allow	ps
 allow	ps /tmp/x
 allow	sleep
@@ -1483,9 +1573,9 @@ deny	command find /etc
 passthrough	find /Users/vosslab/scratch_random_dir
 
 # --- 2026-05-21 audit: dev-server lifecycle + curl + empty/null + python3 -m ---
-# kill stays passthrough (too powerful: signals arbitrary PIDs).
-passthrough	kill 12345
-passthrough	kill -9 $PID
+# kill/pkill/killall are denied (2026-06-23 audit) -- steered to graceful self-exit + pgrep.
+deny	kill 12345
+deny	kill -9 $PID
 # wait is a Bash builtin used after backgrounding `&`; sleep is generic delay.
 allow	wait
 allow	wait 2>/dev/null

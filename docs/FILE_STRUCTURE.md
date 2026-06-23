@@ -58,7 +58,7 @@ tests/
 +- test_protected_branch_config.toml  Config for the protected-branch tests
 +- fixtures/*.json              HookInput fixtures referenced by integration_test.rs
 +- conftest.py                  pytest setup (REPO_ROOT discovery)
-+- git_file_utils.py            Shared helper for repo-root resolution
++- file_utils.py            Shared helper for repo-root resolution
 +- check_ascii_compliance.py    Single-file ASCII linter
 +- fix_ascii_compliance.py      Single-file ASCII fixer
 +- fix_whitespace.py            Single-file whitespace fixer

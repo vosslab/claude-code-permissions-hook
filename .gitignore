@@ -4,6 +4,7 @@ report*.txt
 # === UNIVERSAL ===
 report_*.txt
 _temp*.?*
+OTHER_REPOS/
 # === RUST ===
 /target/
 **/target/

@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-06-23
+
+### Additions and New Features
+
+- Added a built-binary allow rule (both configs) so the agent can run a freshly-built first-party binary from the current working directory without a prompt: `command_regex = "^(\\./)?(${BUILD_OUT})"` with new variable `BUILD_OUT = "\\.build/|target/(?:debug|release)/"` (SwiftPM `.build/`, Cargo `target/debug|release/`). CWD-relative only; absolute build paths stay passthrough, `..` trips `${NO_TRAVERSAL}`, and a `$(...)` argument fails `${NO_CMD_SUB}` and falls to passthrough. This was the dominant audit gap: 51 of 179 real passthroughs (28%) were running just-built `.build/` binaries in a build/run/screenshot loop.
+- Added a `sips` write-form allow scoped to `/tmp` (both configs), mirroring the `TMP_SCOPED_CMDS` rule shape: crop/resample/convert (`-c`, `-z`, `-s`, `--out`) auto-allow when every path is under `/tmp`. The existing `sips -g` read rule is unchanged.
+- Added an `ffmpeg` decode-only validation allow (both configs): `ffmpeg ... -f null -` (or `-f null /dev/null`) auto-allows regardless of input path because it writes nothing. Real file outputs stay gated by the `/tmp`-scoped rule.
+- Added read-only inspection allows (both configs): `plutil -lint`, `plutil -convert ... -o -` (stdout only), and verb-scoped `diskutil (list|info)`. `diskutil` uses an explicit read-verb allow-list, not an exclude-list, so destructive verbs (`eraseDisk`, `partitionDisk`, `unmountDisk`, ...) stay passthrough even if Apple adds new ones.
+
+### Behavior or Interface Changes
+
+- **`kill`, `pkill`, and `killall` are now denied** (both configs), steered with a positive message toward graceful self-exit plus `pgrep`: "Let the program exit on its own. For an app under test, launch it with a concrete timeout such as --auto-exit=3. To find a running instance, use `pgrep -l <app-name>` and let the user stop it." `pkill` was previously allowed via `PROC_CMDS`; it was removed from that variable (`PROC_CMDS = "pgrep|ps|sleep|timeout|wait"`) so the allow groups stay honest. `pgrep` remains allowed.
+- **`perl` in-place edits (`-i` flag) are now denied** (both configs), steered to the Edit tool. The regex matches bare `-i`, backup-suffix `-i.bak`, and `-i` clustered with loop/print switches (`-pi`, `-0pi`, `-ip`); a switch-letter class keeps `-MTime::HiRes`, uppercase `-I/inc`, plain loop flags (`-pe`, `-ne`), and `perl script.pl` from matching.
+- **`osascript` is now denied** (both configs), steered to asking the user or using a screenshot helper. AppleScript can drive and inspect arbitrary apps.
+- **`screencapture` with command substitution is now denied** (both configs); plain `screencapture` stays allowed via `SYS_CMDS`. Steered to looking up the window id in a separate reviewed step.
+- **The `claude` CLI in dispatch mode (`-p`/`--print`) is now denied** (both configs), steered to the Agent tool. CLI dispatch spawns an unsupervised nested agent the hook cannot observe and risks recursion.
+
+### Fixes and Maintenance
+
+- Added ~55 fixtures to `tests/command_decisions.tsv` covering all new rules with near-miss negatives (built-binary cmd-sub/absolute/`..` passthrough, sips `/tmp` vs non-`/tmp`, ffmpeg `-f null` vs transcode, plutil stdout vs file write, diskutil read vs destructive verbs, perl in-place vs `-MTime::HiRes`, kill/pkill/killall vs pgrep). Updated stale `kill`/`pkill` fixtures from `allow`/`passthrough` to `deny`. Full suite green against both configs (`./config_test.sh`, 2386 pass).
+
+### Decisions and Failures
+
+- 2026-06-23 passthrough audit (339 log records). 160 were synthetic `decision-runner` fixtures and excluded; the 179 real records spanned 7 repos, ~166 from `swift-usb-imager` GUI development. The single dominant gap was running just-built `.build/` binaries (51 records); fixing that one rule removes most of the loop's downstream flailing (process-kill juggling, toolchain archaeology).
+- Built-binary allow keyed on the build-output prefix (`.build/`, `target/debug|release/`) rather than the brittle arch-specific path, so future arches and Rust outputs ride along. CWD-relative only to keep the trust boundary at "an artifact this repo just compiled."
+- `diskutil` scoped to an explicit read-verb allow-list (user decision): the destructive verbs live in the same binary, and in a USB-imager repo they are the live-fire surface, so a broad `^diskutil` allow was rejected.
+- Deny reasons use positive ("Do X / Use Y") phrasing with the unwanted tool name omitted, because small models can invert "do not X" into doing X. The kill steer gives a concrete `--auto-exit=3` example rather than a `--auto-exit=N` placeholder, which a small model might pass literally.
+- Deferred to a future Rust path-zone task (user decision): (1) `ffmpeg` transcode reading an absolute-path input while writing to `/tmp`, and (2) extending the whole `TMP_SCOPED` media group to write to `/tmp` OR the user workspace. Both need to separate input from output (or test "all paths in a safe zone"), which pure regex cannot express without lookahead (the Rust regex engine has none); a regex fallback would leave a residual over-allow. Until then those stay passthrough.
+
+### Developer Tests and Notes
+
+- Verified via `./config_test.sh` (cargo build/test + `run_command_decisions.py` against both live and example configs) and focused `run_command_decisions.py` runs for each new rule group. Pre-existing `cargo clippy -- -D warnings` warnings in `src/` are unrelated to this config-only change (no Rust files were modified).
+
 ## 2026-06-16
 
 ### Additions and New Features

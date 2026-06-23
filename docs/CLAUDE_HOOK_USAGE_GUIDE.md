@@ -1,6 +1,6 @@
 # Claude hook usage guide
 
-_Last updated: 2026-06-03 19:30 UTC. Source of truth: `claude-code-permissions-hook`
+_Last updated: 2026-06-23 18:37 UTC. Source of truth: `claude-code-permissions-hook`
 repo. Mirrors in sibling repos (e.g. `starter-repo-template`) are copies; do not
 edit mirrors directly._
 
@@ -116,6 +116,18 @@ scripts/build.sh
 
 `bash -n script.sh` (syntax check) is denied -- inspect the script with the
 Read tool instead. See the denied commands section.
+
+### Built binaries (.build/, target/)
+
+Run a freshly-built first-party binary from the CWD. SwiftPM emits under `.build/`,
+Cargo under `target/debug|release/`. CWD-relative only; absolute paths, `..`, and
+command substitution fall to passthrough.
+
+```bash
+.build/debug/app --version          # allowed
+./target/release/tool --help        # allowed
+/abs/.build/debug/app               # passthrough (absolute)
+```
 
 ### Safe utilities
 
@@ -242,6 +254,16 @@ convert /tmp/in.png /tmp/out.jpg                # allowed
 ffmpeg -i /tmp/in.wav /Users/me/out.wav         # passthrough (out of tmp)
 convert in.png out.png                          # passthrough (no tmp path)
 ```
+
+`sips` write forms (`-c`, `-z`, `-s`, `--out`) are also `/tmp`-scoped here; `sips -g`
+metadata reads are allowed at any path. `ffmpeg ... -f null -` (decode-only validation,
+no output file) is allowed for any input path.
+
+### macOS read-only inspection
+
+`diskutil list` / `diskutil info` are allowed (read verbs); destructive verbs
+(`eraseDisk`, `partitionDisk`, `unmountDisk`) stay passthrough. `plutil -lint` and
+`plutil -convert ... -o -` (stdout) are allowed; convert-to-file forms passthrough.
 
 ### File deletion (safe patterns)
 
@@ -541,6 +563,33 @@ ffprobe -f lavfi -i sine=440      # allowed (synthetic/lavfi probe)
 Use the `/webwork-writer` skill lint guide instead. PGML is not standard Perl.
 
 **Blocked:** `perl -c problem.pgml`, `perl problem.pg`.
+
+### `perl` in-place edits (`-i`)
+
+Use the Edit tool for in-place edits (it shows a diff). Plain `perl script.pl` is fine.
+
+**Blocked:** `perl -pi -e '...' f`, `perl -0pi -e '...' f`, `perl -i -pe '...' f`.
+
+### `osascript`, `screencapture $(...)`
+
+`osascript` can drive arbitrary apps -- ask the user or use a screenshot helper. Plain
+`screencapture /tmp/x.png` is allowed; the command-substitution form is blocked.
+
+**Blocked:** `osascript -e '...'`, `screencapture -l $(osascript ...) /tmp/x.png`.
+
+### `claude` CLI dispatch (`-p`/`--print`)
+
+Use the Agent tool to dispatch subagents; the `claude` CLI spawns an unsupervised
+nested agent the hook cannot see.
+
+**Blocked:** `claude -p "..."`, `claude --print "..."`.
+
+### `kill` / `pkill` / `killall`
+
+Let the program exit on its own (for an app under test, launch with `--auto-exit=3`).
+Find a running instance with `pgrep -l <name>` and let the user stop it.
+
+**Blocked:** `kill 123`, `kill -9 $PID`, `pkill app`, `killall app`.
 
 ### Heredocs (`<<EOF`)
 

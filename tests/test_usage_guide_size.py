@@ -9,15 +9,15 @@ size, not a tight fit, so normal edits do not churn the limit.
 
 import os
 
-import git_file_utils
+import file_utils
 
 # Hard ceiling on the guide size, in characters (bytes for ASCII content).
 MAX_CHARS = 40000
 
 
 #============================================
-def test_usage_guide_under_char_limit():
-	repo_root = git_file_utils.get_repo_root()
+def test_usage_guide_under_char_limit() -> None:
+	repo_root = file_utils.get_repo_root()
 	guide_path = os.path.join(repo_root, "docs", "CLAUDE_HOOK_USAGE_GUIDE.md")
 	with open(guide_path, encoding="utf-8") as handle:
 		text = handle.read()

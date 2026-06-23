@@ -40,9 +40,9 @@ import subprocess
 # directory to sys.path so this script can be invoked from the repo root.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "tests"))
-import git_file_utils
+import file_utils
 
-REPO_ROOT = git_file_utils.get_repo_root()
+REPO_ROOT = file_utils.get_repo_root()
 HOOK = os.path.join(REPO_ROOT, "target", "release", "claude-code-permissions-hook")
 LIVE_CFG = os.path.expanduser("~/.config/claude-code-permissions-hook.toml")
 EXAMPLE_CFG = os.path.join(REPO_ROOT, "example.toml")

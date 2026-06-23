@@ -41,9 +41,10 @@ CHECKSUM_CMDS = "md5|md5sum|shasum|sha256sum"
 FS_CMDS = "basename|cd|chmod|cp|dirname|du|df|ln|ls|lsof|mkdir|mktemp|open|readlink|realpath|stat|tar|touch|tree|type|unlink|unzip|which"
 # Process info and management
 # wait is a Bash builtin used for dev-server lifecycle (`wait $DEVPID`); included
-# here so a bare `wait` leaf is auto-allowed. kill is intentionally NOT included
-# (too powerful: signals arbitrary PIDs, including user shells) -- passthrough.
-PROC_CMDS = "pgrep|pkill|ps|sleep|timeout|wait"
+# here so a bare `wait` leaf is auto-allowed. kill, pkill, and killall are NOT
+# included (too powerful: signal arbitrary PIDs/process names, including user
+# shells) -- they are denied and steered toward graceful self-exit + pgrep below.
+PROC_CMDS = "pgrep|ps|sleep|timeout|wait"
 # System info and shell builtins
 SYS_CMDS = "curl|date|echo|env|export|expr|false|id|nproc|numfmt|printenv|printf|pwd|screencapture|source|test|true|tty|uname|whoami|xcrun|xxd"
 # Build and lint tools (read-only or local-build only, no installs)
@@ -56,6 +57,12 @@ TMP_SCOPED_CMDS = "ffmpeg|sox|convert|magick|mogrify|gm|optipng|pngcrush|jpegopt
 # Absolute-path roots that disqualify a tmp-scoped invocation.
 # Excludes /tmp and /private/tmp by construction (they are not in this list).
 NON_TMP_ROOTS = "Users|home|usr|etc|opt|var|bin|sbin|root|sys|proc|dev|Library|System|Applications|boot|mnt|media|nsh"
+
+# Local build-output directory prefixes for running freshly-built first-party
+# binaries from the current working directory. SwiftPM emits under .build/;
+# Cargo emits under target/debug/ and target/release/. Used by the built-binary
+# allow rule below (CWD-relative only; absolute paths and `..` stay out).
+BUILD_OUT = "\\.build/|target/(?:debug|release)/"
 
 # --- Local runtimes (can execute code, constrained allow patterns only) ---
 # npx: only whitelisted packages auto-allowed; unknown packages passthrough to user prompt.
@@ -821,6 +828,16 @@ tool = "Bash"
 command_regex = "^perl\\b.*\\.pg(ml)?\\b"
 reason = "Use the `/webwork-writer` skill lint guide to validate WeBWorK problems. Running `perl` on .pg/.pgml files is rejected because PGML is not standard Perl."
 
+# Deny perl in-place edits (the -i flag) -- steer to the Edit tool. Matches a bare
+# `-i`, a backup-suffix `-i.bak`, or `-i` clustered with loop/print switches
+# (-pi, -0pi, -ip, -ni). The switch-letter class keeps `-MTime::HiRes`, `-I/inc`
+# (uppercase I), and plain loop flags (-pe, -ne) from matching; `perl script.pl`
+# and `perl --version` are unaffected.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}perl\\b.*\\s-(i(\\.[^\\s]*)?|[pnlaws0]*i[pnlaws0]*)(\\s|$)"
+reason = "Use the Edit tool to change files in place. It applies the edit and shows a reviewable diff."
+
 # Allow plain `perl <script>.pl` script execution. Analogous to
 # `python3 <script>.py`. The WeBWorK deny above still fires first on
 # `.pg`/`.pgml` extensions (steered to /webwork-writer skill).
@@ -855,6 +872,34 @@ tool = "Bash"
 command_regex = "^ffprobe(\\s|$)"
 command_exclude_regex = "(\\s|^)-show_(chapters|packets|frames)\\b|(\\s|^)-f\\s+lavfi\\b"
 reason = "Use `mediainfo --Output=JSON <file>` for container, codec, and track metadata. `ffprobe` is allowed only with `-show_chapters`, `-show_packets`, `-show_frames`, or `-f lavfi` -- the cases mediainfo cannot handle."
+
+# --- macOS GUI and process steering ---
+
+# Deny screencapture with command substitution (e.g. -l $(osascript ...)).
+# Plain screencapture stays allowed via SYS_CMDS; only the cmd-sub form is steered.
+[[deny]]
+tool = "Bash"
+command_regex = "^screencapture\\b.*(${NO_CMD_SUB})"
+reason = "Look up the window id in a separate step, then pass that literal id to screencapture. A screenshot helper script can target the window for you."
+
+# Deny osascript (AppleScript) -- it can drive and inspect arbitrary apps.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}osascript\\b"
+reason = "Ask the user to run any scripted app step. For app screenshots, use a dedicated screenshot helper that targets the window for you."
+
+# Deny the claude CLI in dispatch mode (-p / --print) -- steer to the Agent tool.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}claude\\b.*\\s(-p|--print)\\b"
+reason = "Use the Agent tool to dispatch subagents. It runs in your current session, stays observable, and follows the same permission rules."
+
+# Deny kill / pkill / killall -- steer to graceful self-exit + pgrep. The agent
+# tends to hand-roll PID juggling; killing processes is left to the user.
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(kill|pkill|killall)\\b"
+reason = "Let the program exit on its own. For an app under test, launch it with a concrete timeout such as --auto-exit=3. To find a running instance, use `pgrep -l <app-name>` and let the user stop it."
 
 # --- Sensitive-path reads ---
 # Block any command that references credential or auth files. Match is
@@ -982,6 +1027,25 @@ command_exclude_regex = "${NO_CMD_SUB}"
 tool = "Bash"
 command_regex = "^(${TMP_SCOPED_CMDS})\\b.*(\\s|=)(/private)?/tmp/"
 command_exclude_regex = "(\\s|^|=)/(${NON_TMP_ROOTS})\\b|${NO_CMD_SUB}"
+
+# Run a freshly-built first-party binary from the current working directory.
+# SwiftPM emits under .build/ (e.g. .build/debug/, .build/arm64-apple-macosx/debug/);
+# Cargo emits under target/debug/ and target/release/. CWD-relative only (the leading
+# ./ is optional). Absolute build paths do not match and stay passthrough; any `..`
+# trips ${NO_TRAVERSAL}; a $(...) argument fails ${NO_CMD_SUB} and falls to passthrough.
+# (2026-06-16 audit: 51/179 real passthroughs were running just-built .build/ binaries.)
+[[allow]]
+tool = "Bash"
+command_regex = "^(\\./)?(${BUILD_OUT})"
+command_exclude_regex = "${NO_CMD_SUB}|${NO_TRAVERSAL}"
+
+# ffmpeg decode-only validation: `-f null -` (or `-f null /dev/null`) decodes the
+# input and writes nothing, so the input path may live anywhere local. Real file
+# outputs are still gated by the /tmp-scoped rule above.
+[[allow]]
+tool = "Bash"
+command_regex = "^ffmpeg\\b.*(\\s)-f\\s+null\\s+(-|/dev/null)\\s*$"
+command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
 # Bash: Python tooling
@@ -1139,6 +1203,36 @@ command_exclude_regex = "(\\s|^)(-e|--eval)\\b|\\bpackage-registry\\s+(login|log
 tool = "Bash"
 command_regex = "^sips\\b.*(\\s|^)(-g|--getProperty)\\b"
 command_exclude_regex = "(\\s|^)(-s|--setProperty|-z|--resample\\w*|--cropToHeightWidth|--cropOffset|--padToHeightWidth|--padColor|-r|--rotate|-f|--flip|-o|--out|-d|--delete\\w*|-i|--addIcon|-m|--matchTo\\w*|-e|--embedProfile)\\b|${NO_CMD_SUB}"
+
+# Bash: sips write forms (crop, resample, convert) scoped to /tmp.
+# Mirrors the tmp-scoped rule shape: requires a /tmp path and disqualifies any
+# non-scratch absolute root. Lets the agent crop screenshots into /tmp; a write to
+# ~/ or /Users falls through to passthrough.
+[[allow]]
+tool = "Bash"
+command_regex = "^sips\\b.*(\\s|=)(/private)?/tmp/"
+command_exclude_regex = "(\\s|^|=)/(${NON_TMP_ROOTS})\\b|${NO_CMD_SUB}"
+
+# Bash: plutil read-only forms. `-lint` validates and never writes. `-convert` can
+# write (in place by default, or to `-o <file>`), so allow it only when output is
+# stdout (`-o -`). Convert-to-file forms fall through to passthrough.
+[[allow]]
+tool = "Bash"
+command_regex = "^plutil\\s+-lint\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+[[allow]]
+tool = "Bash"
+command_regex = "^plutil\\s+-convert\\b.*\\s-o\\s+-(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Bash: diskutil read-only verbs only. `list` and `info` report layout and volume
+# metadata. Destructive verbs (eraseDisk, partitionDisk, unmountDisk, ...) live in
+# the same binary, so match only the read verbs and let the rest passthrough.
+[[allow]]
+tool = "Bash"
+command_regex = "^diskutil\\s+(list|info)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
 # Bash: git allowlist
