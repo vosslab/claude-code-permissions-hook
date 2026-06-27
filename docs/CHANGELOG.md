@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-06-26
+
+### Additions and New Features
+
+- Added a "Guide philosophy" section near the top of `docs/CLAUDE_HOOK_USAGE_GUIDE.md` as a north-star for migrating the guide from an exhaustive command catalog toward principles plus recovery. It states that the TOML config is the source of truth for exact patterns and deny `reason` text (which the agent sees live at runtime), that per-repo-type and single-tool specifics belong in the config, and that older enumerated sections get trimmed toward this model as they are touched. Phrased positively per the small-LM prompting guidance.
+
+### Fixes and Maintenance
+
+- Trimmed fat in the `find` deny section of the hook guide: condensed the exhaustive "Not in this pass" predicate dump to a short representative list, dropped the residual-passthrough edge-case paragraph, and shortened the niche SolidJS-route quoted-segment example.
+- Trimmed redundant `**Why:**` rationale prose from the heaviest deny sections (`rm`, `cat`/`head`/`tail`, `git restore .`/`git checkout -- .`) since the hook already returns its `reason` to the agent at deny time; kept the `**Blocked:**` examples and recovery one-liners. Also condensed the nine-line `git restore .` blocked-example dump to a few representatives.
+
+### Removals and Deprecations
+
+- Removed the `perl` on `.pg`/`.pgml` files section from `docs/CLAUDE_HOOK_USAGE_GUIDE.md` entirely (heading, steer text, and Blocked examples). It documented a deny rule that only matters in a single niche repo type (WeBWorK/PGML problem authoring) and named the `/webwork-writer` skill; the hook guide is a general best-practices doc and the config carries per-repo-type rules. The `.pg`/`.pgml` perl deny still lives in the TOML configs; the guide now omits it. The universal `source_me.sh`, `~/nsh/`, and `~/.claude/` references stay (they apply to every repo).
+
 ## 2026-06-23
 
 ### Additions and New Features
