@@ -53,7 +53,7 @@ DEV_CMDS = "bandit|make|pyflakes"
 SAFE_CMDS = "${TEXT_CMDS}|${SEARCH_CMDS}|${FORMAT_CMDS}|${INSPECT_CMDS}|${CHECKSUM_CMDS}|${FS_CMDS}|${PROC_CMDS}|${SYS_CMDS}|${DEV_CMDS}"
 # Tools that can write/read freely as long as every path stays under /tmp.
 # Used by the "tmp-scoped" allow rule below. Add new tools here.
-TMP_SCOPED_CMDS = "ffmpeg|sox|convert|magick|mogrify|gm|optipng|pngcrush|jpegoptim|cwebp|tesseract|qpdf|pdftk|gs|lame|flac"
+TMP_SCOPED_CMDS = "ffmpeg|sox|convert|magick|mogrify|gm|optipng|pngcrush|jpegoptim|cwebp|tesseract|qpdf|pdftk|gs|lame|flac|pandoc|soffice|pdftoppm"
 # Absolute-path roots that disqualify a tmp-scoped invocation.
 # Excludes /tmp and /private/tmp by construction (they are not in this list).
 NON_TMP_ROOTS = "Users|home|usr|etc|opt|var|bin|sbin|root|sys|proc|dev|Library|System|Applications|boot|mnt|media|nsh"
@@ -218,6 +218,21 @@ reason = "Use `git diff` and `git diff --staged` to inspect changes without hidi
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}clean\\b"
 reason = "Use targeted `rm` against specific files, or ask the user to clean up manually. `git clean` is rejected because it destroys untracked files in one shot."
+
+# Deny git tag (every form, including read-only `git tag --list`). Tags are
+# unused in this workflow; the regex anchors on the `tag` subcommand so listing
+# is not carved out. Mirrors the git allow's invocation-prefix handling.
+[[deny]]
+tool = "Bash"
+command_regex = "^git\\s+((-C\\s+\\S+|-c\\s+\\S+|--no-pager)\\s+)*tag\\b"
+reason = "Ask the user to list or create tags."
+
+# Deny git init (every form). Repository bootstrap belongs in a dedicated setup
+# script, not in agent runs.
+[[deny]]
+tool = "Bash"
+command_regex = "^git\\s+((-C\\s+\\S+|-c\\s+\\S+|--no-pager)\\s+)*init\\b"
+reason = "Run repository bootstrap from a dedicated setup script."
 
 # Deny wholesale-discard forms of git restore.
 # Matches `git restore .`, `git restore :/`, `git restore --staged --worktree .`,
@@ -472,7 +487,7 @@ command_regex = "^[A-Z_][A-Z0-9_]*=\\$[!?$]$"
 # `python3 -B -c`). `python3 script.py` is unaffected -- no -c token.
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}python3?[^\\s]*\\s+(-\\S+\\s+)*-c\\b"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}python3?[^\\s]*\\s+((-X|-W|--check-hash-based-pycs)(=|\\s+)\\S+\\s+|-\\S+\\s+)*-c\\b"
 reason = "Write a `_temp.py` file (underscore-prefixed files can be removed freely), then run `source source_me.sh && python3 _temp.py`. `python -c` with inline code is rejected because it is hard to lint and debug."
 
 # --- Shell anti-patterns ---
@@ -775,7 +790,7 @@ reason = "Use `git ls-files <pathspec>` to identify candidate files, then use th
 # (matches the python -c rule shape).
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}node\\s+(-\\S+\\s+)*(-e|--eval)\\b"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}node\\s+((--import|--loader|--require|--experimental-loader|-r)(=|\\s+)\\S+\\s+|-\\S+\\s+)*(-e|--eval)\\b"
 reason = "Write the JS to a `_temp.mjs` file and run `node _temp.mjs`. `node -e` / `node --eval` with inline code is rejected because it is hard to lint and debug, and can hide command substitution or child_process calls. Same rule shape as `python -c`."
 
 # Deny `swift -e` / `swift --eval` inline Swift. Same risk profile as
@@ -787,7 +802,7 @@ reason = "Write the JS to a `_temp.mjs` file and run `node _temp.mjs`. `node -e`
 # (matches the python -c / node -e rule shape).
 [[deny]]
 tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}swift\\s+(-\\S+\\s+)*(-e|--eval)\\b"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}swift\\s+((-I|-L|-D|-framework|-Xcc|-Xswiftc|--package-path)(=|\\s+)\\S+\\s+|-\\S+\\s+)*(-e|--eval)\\b"
 reason = "Write the Swift to a `_temp.swift` file and run it, or run `swift build`/`swift test` directly. `swift -e` / `swift --eval` with inline code is rejected because it is hard to lint and debug. Same rule shape as `python -c` / `node -e`."
 
 # Deny `xcode-select`. In the 2026-06-16 audit it appeared only as
@@ -1039,6 +1054,17 @@ tool = "Bash"
 command_regex = "^(\\./)?(${BUILD_OUT})"
 command_exclude_regex = "${NO_CMD_SUB}|${NO_TRAVERSAL}"
 
+# Run a freshly-built first-party binary by its workspace-absolute path. Same
+# trust as the CWD-relative rule above, extended to the absolute-in-workspace
+# form (`~/<ws>`, `/Users/<me>/<ws>`, `$HOME/<ws>`) so a binary referenced by its
+# full workspace path also auto-allows. Bounded to the workspace root; `..` trips
+# ${NO_TRAVERSAL}; a $(...) argument fails ${NO_CMD_SUB}. Absolute paths outside
+# the workspace stay passthrough.
+[[allow]]
+tool = "Bash"
+command_regex = "^(?:~|/Users/[^/\\s]+|[$]HOME)/${WORKSPACE_ROOT}/[^\\s]*?(${BUILD_OUT})"
+command_exclude_regex = "${NO_CMD_SUB}|${NO_TRAVERSAL}"
+
 # ffmpeg decode-only validation: `-f null -` (or `-f null /dev/null`) decodes the
 # input and writes nothing, so the input path may live anywhere local. Real file
 # outputs are still gated by the /tmp-scoped rule above.
@@ -1085,36 +1111,19 @@ command_exclude_regex = "${NO_CMD_SUB}"
 # so these rules match both prefixed and non-prefixed forms.
 # -------------------------------------------------------------------
 
-# node running local scripts and common test/check/dev modes.
-# Allows local project script execution and test workflows while avoiding broad
-# inline JS execution through -e/--eval. Node is a general-purpose interpreter
-# (spawn shells, network, fs); only path-trailing forms with a known flag set
-# are auto-allowed. Bare -e/--eval and unrecognized --long-flags passthrough.
-# Allowed flag tokens before the trailing script path:
-#   --test, --watch, --check, -c, --loader(=|<space>)<arg>,
-#   --import(=|<space>)<arg>, --test-name-pattern(=|<space>)<arg>,
-#   --test-only, --test-reporter(=|<space>)<arg>, any short -<letters> flag.
-# Allowed script extensions: .js .mjs .cjs .mts .cts .ts .tsx
-# The trailing path token may be wrapped in single/double quotes and may
-# contain glob metacharacters (* ? [ ]) so `node --import tsx --test
-# 'tests/test_*.mjs'` (the node:test glob form) auto-allows. The extension
-# anchor still applies inside the quotes.
-# The trailing `(\s.*)?$` intentionally allows arbitrary script arguments
-# AFTER the script path (e.g. `node app.js --port 3000`): once the script
-# itself is an allowed local file, its own argv is the script's concern, not
-# the hook's. The `$` anchor means the match is full-command, not a prefix --
-# nothing unexpected can hide between the extension and end-of-leaf.
+# Broad node allow for the local dev loop: scripts, test/watch/check modes, and
+# directory-form test runs (`node --import tsx --test tests/`) that the older
+# file-leaf rule missed. Same trust already granted to `./script.sh` and
+# `node script.js` -- running first-party code from the working tree. The
+# exclude mirrors the node-eval deny's flag-skip clause so it blocks inline JS
+# (`-e`/`--eval`) only when those are node's OWN flags, never when they are a
+# script's argument (`node script.js -e foo` stays allowed). Real inline eval is
+# already denied by the dedicated node-eval deny above (checked first); this
+# exclude is belt-and-suspenders. Command substitution is blocked.
 [[allow]]
 tool = "Bash"
-command_regex = "^node\\s+((--test|--watch|--check|-c|--loader(=|\\s+)\\S+|--import(=|\\s+)\\S+|--test-name-pattern(=|\\s+)\\S+|--test-only|--test-reporter(=|\\s+)\\S+|-[a-zA-Z]+)\\s+)*[\"']?[A-Za-z0-9_./*?\\[\\]-]+\\.(js|mjs|cjs|mts|cts|ts|tsx)[\"']?(\\s.*)?$"
-command_exclude_regex = "${NO_CMD_SUB}"
-
-# Bare diagnostic / no-script forms: node --test (runs default test glob),
-# node --version, node --help.
-[[allow]]
-tool = "Bash"
-command_regex = "^node\\s+(--test|--version|--help)(\\s|$)"
-command_exclude_regex = "${NO_CMD_SUB}"
+command_regex = "^node\\b"
+command_exclude_regex = "^node\\s+((--import|--loader|--require|--experimental-loader|-r)(=|\\s+)\\S+\\s+|-\\S+\\s+)*(-e|--eval)\\b|${NO_CMD_SUB}"
 
 # npx with known-safe local dev tool packages only.
 # Unknown packages still passthrough to user prompt.
@@ -1124,7 +1133,7 @@ command_exclude_regex = "${NO_CMD_SUB}"
 # `npx --prefix /path/to/project tsc --version`.
 [[allow]]
 tool = "Bash"
-command_regex = "^npx\\s+((--prefix(=|\\s+)\\S+|-p\\s+\\S+|--package(=|\\s+)\\S+|--yes|-y|--no-install|--no)\\s+)*(tsc|tsx|eslint|prettier|playwright|esbuild)(\\s|$)"
+command_regex = "^npx\\s+((--prefix(=|\\s+)\\S+|-p\\s+\\S+|--package(=|\\s+)\\S+|--yes|-y|--no-install|--no)\\s+)*(tsc|tsx|eslint|prettier|playwright|esbuild|vitest|jest|vite|http-server|serve|tailwindcss|@biomejs/biome|nodemon|concurrently)(\\s|$)"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # eslint -- local code linter (read-only analysis)
@@ -1191,6 +1200,26 @@ command_regex = "^swift\\b"
 command_exclude_regex = "(\\s|^)(-e|--eval)\\b|\\bpackage-registry\\s+(login|logout|set)\\b|${NO_CMD_SUB}"
 
 # -------------------------------------------------------------------
+# Bash: rustc -- local Rust compiler. Compiles source from the working tree;
+# same trust as `cargo build`. Command substitution is blocked.
+# -------------------------------------------------------------------
+[[allow]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}rustc\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
+# Bash: rustup read-only queries. Reports installed toolchains/targets and the
+# active toolchain. Mutating verbs (install, default, override, update,
+# toolchain install, target add) are absent, so they stay passthrough -- installs
+# stay gated for per-run user approval.
+# -------------------------------------------------------------------
+[[allow]]
+tool = "Bash"
+command_regex = "^rustup\\s+(show|which|--version|component\\s+list|toolchain\\s+list|target\\s+list)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# -------------------------------------------------------------------
 # Bash: sips (read-only metadata query)
 # `sips -g <prop>` reads image properties (pixelWidth/Height, format) and
 # never writes. Allowed regardless of path because it is read-only by form.
@@ -1204,6 +1233,15 @@ tool = "Bash"
 command_regex = "^sips\\b.*(\\s|^)(-g|--getProperty)\\b"
 command_exclude_regex = "(\\s|^)(-s|--setProperty|-z|--resample\\w*|--cropToHeightWidth|--cropOffset|--padToHeightWidth|--padColor|-r|--rotate|-f|--flip|-o|--out|-d|--delete\\w*|-i|--addIcon|-m|--matchTo\\w*|-e|--embedProfile)\\b|${NO_CMD_SUB}"
 
+# Bash: magick read-only inspection (`identify`, `-list`). Neither writes.
+# `magick` is in TMP_SCOPED_CMDS, so transform/convert forms only auto-allow
+# under /tmp; these read-only subverbs are safe at any path (e.g. the
+# screenshot->docs workflow `magick identify repo/docs/x.png`).
+[[allow]]
+tool = "Bash"
+command_regex = "^magick\\s+(identify|-list)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
 # Bash: sips write forms (crop, resample, convert) scoped to /tmp.
 # Mirrors the tmp-scoped rule shape: requires a /tmp path and disqualifies any
 # non-scratch absolute root. Lets the agent crop screenshots into /tmp; a write to
@@ -1212,6 +1250,13 @@ command_exclude_regex = "(\\s|^)(-s|--setProperty|-z|--resample\\w*|--cropToHeig
 tool = "Bash"
 command_regex = "^sips\\b.*(\\s|=)(/private)?/tmp/"
 command_exclude_regex = "(\\s|^|=)/(${NON_TMP_ROOTS})\\b|${NO_CMD_SUB}"
+
+# Bash: screenshot (easy-screenshot CLI). Captures a local window to a PNG;
+# this is the screenshot-docs skill's primary local-capture command.
+[[allow]]
+tool = "Bash"
+command_regex = "^screenshot\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
 
 # Bash: plutil read-only forms. `-lint` validates and never writes. `-convert` can
 # write (in place by default, or to `-o <file>`), so allow it only when output is
@@ -1224,6 +1269,27 @@ command_exclude_regex = "${NO_CMD_SUB}"
 [[allow]]
 tool = "Bash"
 command_regex = "^plutil\\s+-convert\\b.*\\s-o\\s+-(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Bash: xmllint read/format only. Reads, validates, and pretty-prints XML to
+# stdout. The exclude blocks the output-file flags (-o/--output) so in-place or
+# to-file writes fall through to passthrough.
+[[allow]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}xmllint\\b"
+command_exclude_regex = "(\\s|^)(-o|--output)\\b|${NO_CMD_SUB}"
+
+# Bash: strings dumps printable byte sequences from a file. Read-only; never
+# writes. Allowed at any path.
+[[allow]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}${TOOL_PATH}strings\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Bash: fc-list lists installed fonts. Read-only system query.
+[[allow]]
+tool = "Bash"
+command_regex = "^fc-list\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
 # Bash: diskutil read-only verbs only. `list` and `info` report layout and volume
@@ -1383,10 +1449,18 @@ tool = "Bash"
 command_regex = "^brew\\s+(list|info|search|--prefix)\\b"
 command_exclude_regex = "${NO_CMD_SUB}"
 
+# Broad npm allow for info queries and repo-local script execution (`npm run`,
+# `npm test`, `npm view`, `npm ls`, `npm pkg get`, read-only `npm audit`). The
+# exclude keeps machine-changing and registry/auth forms gated: installs
+# (install/i/ci/add/update/upgrade/uninstall/remove/rm/prune/dedupe), package
+# execution (exec/x, parity with the npx whitelist), publish/auth, manifest
+# writes (`npm pkg set|delete`), and `npm audit fix` all fall through to
+# passthrough. Running first-party scripts from the local package.json is the
+# same trust already granted to `./script.sh` and `node script.js`.
 [[allow]]
 tool = "Bash"
-command_regex = "^npm\\s+(list|root|ls|show|view|info|search|outdated|doctor|prefix|version|--version)\\b"
-command_exclude_regex = "${NO_CMD_SUB}"
+command_regex = "^npm\\b"
+command_exclude_regex = "^npm\\s+(install|i|ci|add|update|upgrade|uninstall|remove|rm|prune|dedupe|exec|x|publish|unpublish|login|logout|adduser|owner|deprecate|token|star|unstar)\\b|^npm\\s+pkg\\s+(set|delete)\\b|^npm\\s+audit\\s+fix\\b|${NO_CMD_SUB}"
 
 # npm run -- executes scripts defined in local package.json
 [[allow]]

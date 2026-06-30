@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-06-30
+
+### Additions and New Features
+
+- Added read-only inspector allows (both configs): `magick identify`/`magick -list` at any path (steered around the `/tmp`-scoped `magick` convert/transform rule, which still gates write forms), `xmllint` without an output flag, `strings`, `fc-list`, and `npm pkg get` (`npm pkg set|delete` stay passthrough).
+- Added a workspace-absolute built-binary allow (both configs), complementing the existing CWD-relative allow: a freshly built first-party binary under `~/<workspace>/.../.build/...` or `target/(debug|release)/...` auto-allows when referenced by its full workspace path, not just relative to cwd. Bounded by `${NO_TRAVERSAL}` and `${NO_CMD_SUB}`; absolute paths outside the workspace stay passthrough.
+- Added `pandoc`, `soffice`, and `pdftoppm` to the `/tmp`-scoped media/doc-converter group (`TMP_SCOPED_CMDS`, both configs). This is a partial fix: it auto-allows the all-paths-under-`/tmp` case, but the common shape "workspace input, `/tmp` output" (for example `soffice --convert-to ... --outdir /tmp <workspace file>.xlsx`) still passes through -- separating input path from output path needs the already-deferred Rust path-zone work (see 2026-06-23), not pure regex.
+- Added a `screenshot` allow (both configs) for the easy-screenshot CLI used by the screenshot-docs skill.
+- Broadened the local dev-loop toolchains (both configs), per the user's stated trust principles (allow network info-gathering, local dev-loop execution, and repo-local script execution; keep installs and remote-exec gated):
+  - `node`: replaced the narrow file-leaf allow with a broad `^node\b` allow that excludes inline eval (`-e`/`--eval`) and command substitution. This auto-allows directory-form test runs (`node --import tsx --test tests/`) and flag combinations the old leaf rule missed (`--watch`, etc).
+  - `npm`: replaced the narrow allow with a broad `^npm\b` allow that excludes installs/uninstalls (`install`, `i`, `ci`, `add`, `update`, `upgrade`, `uninstall`, `remove`, `rm`, `prune`, `dedupe`), `exec`/`x`, `publish`/`unpublish`, auth (`login`, `logout`, `adduser`, `owner`, `deprecate`, `token`, `star`, `unstar`), `pkg set|delete`, and `audit fix`. This blesses the same trust already granted to `./script.sh` and `node script.js` -- running first-party code from the working tree (`npm run`, `npm test`) -- while installs and publishing stay gated. The dedicated `npm install --save-dev typescript` allow is unchanged.
+  - `npx`: expanded the package whitelist with `vitest`, `jest`, `vite`, `http-server`, `serve`, `tailwindcss`, `@biomejs/biome`, `nodemon`, `concurrently`. Unknown packages still require approval (npx fetches and executes, beyond info-gathering, so this stays a whitelist, not a broad allow).
+  - `rustc`: new allow for local compilation, mirroring the existing broad `cargo`/`swift` allows.
+  - `rustup`: new read-only allow for `show`, `which`, `--version`, `component list`, `toolchain list`, `target list`. Mutating verbs (`install`, `default`, `override`, `update`, `toolchain install`) are absent, so installs stay gated.
+
+### Behavior or Interface Changes
+
+- **`git tag` and `git init` are now denied** (both configs, all invocation-prefix forms: `-C`, `-c`, `--no-pager`), steered with positive reasons ("Ask the user to list or create tags" / "Run repository bootstrap from a dedicated setup script"). `git tag --list` is denied too -- the regex anchors on the `tag` subcommand, so read-only listing is not carved out. These are explicit user decisions, not derived from the passthrough assessment.
+
+### Fixes and Maintenance
+
+- Fixed an inline-eval deny hole in `node -e`/`--eval`, `python -c`, and `swift -e`/`--eval` (both configs): the flag-skip clause in each deny regex previously only consumed dash-prefixed tokens (`(-\S+\s+)*`), so a value-taking flag followed by a bare value (for example `node --import tsx -e "..."`) stalled the match before reaching `-e` and leaked to passthrough instead of denying. Each deny regex now has a clause that consumes known value-taking flags together with their argument (`--import`/`--loader`/`--require`/`--experimental-loader`/`-r` for node; `-X`/`-W`/`--check-hash-based-pycs` for python; `-I`/`-L`/`-D`/`-framework`/`-Xcc`/`-Xswiftc`/`--package-path` for swift) before falling back to the bare dash-token skip. `node script.js -e foo` (a real file argument before `-e`) still allows -- the design intent (deny inline code execution, allow running a file) is unchanged, only the leak is closed.
+- Renamed the upstream-origin username `korny` to `<upstream-user>` in `tools/run_command_decisions.py` and `tests/README.md` so tracked files do not carry a real third-party account name.
+- Updated `Cargo.toml` `authors` to credit the current maintainer alongside the original upstream author.
+
+### Decisions and Failures
+
+- Passthrough-log assessment driving this batch: 875 JSONL records logged 2026-06-16 through 2026-06-30 in `/tmp/claude-passthrough.json`. 596 carried `cwd=/Users/<upstream-user>/...` -- the upstream fork's bundled synthetic `decision-runner` fixture traffic from running `tools/run_command_decisions.py`/`config_test.sh` -- and were excluded as non-signal. The remaining vosslab-cwd records split into ~209 dated 2026-06-16/06-23 that predate the rules added on those exact days (already handled by prior changelog entries) and the real current signal: real usage after the 2026-06-23 rule batch.
+- Before/after re-evaluation (verification step): the live `/tmp` passthrough log rotates to a `.1` backup at a size threshold, so the original assessment's record count was not fully recoverable from the live file alone by the time this entry was written; reconstructing from the current log plus its `.1` rotation backup (deduplicated by timestamp+cwd+command) yielded 52 post-06-24 vosslab Bash records, not the 76 cited during planning -- the discrepancy is log rotation/growth between planning and closing, not a methodology change. Re-evaluating those 52 against the new live config: **23 now allow** (most common shapes: `xmllint --format`, `strings`, `node --import tsx --test tests/` piped to a filter, `npm pkg get scripts`, `magick -list font`, `fc-list`, `pdftoppm`, `screenshot --help`), **8 now deny** (the inline-eval deny-hole fix catching `node --import tsx -e "..."`/`--eval`, plus the new `git tag --list` and `git init` denies), and **21 still passthrough** (mostly `npm install` runs -- gated by policy -- a `pandoc` workspace-input case the partial `/tmp` fix does not cover, and longer multi-leaf compound commands such as `git -C <path> log --oneline | wc -l` and `chmod +x ... && ./script.sh` that fall outside this batch's scope).
+- `pandoc`/`soffice`/`pdftoppm` workspace-input + `/tmp`-output stays a known, documented limitation rather than an over-allow: pure regex cannot separate "this argument is the input path" from "this argument is the output path" without lookahead the hook's regex engine does not have. Deferred to the same future Rust path-zone task noted on 2026-06-23.
+- `npm`/`npx`/`cargo`/`rustup` installs, `curl`/`wget`/`deno run <url>` remote-exec, and `$(...)` command-substitution forms keep their current passthrough/deny behavior by explicit user decision -- this batch adds no new download or remote-code-execution allow.
+
+### Developer Tests and Notes
+
+- Verified via `./config_test.sh` (cargo build/test plus `tools/run_command_decisions.py` against both the live config and `example.toml`): `OVERALL: ALL TESTS PASSED (passed=2462, skipped=0)`, cargo test 0 failed.
+- Before/after evidence generated with a throwaway `_temp_beforeafter.py` script that re-sent each extracted post-06-24 vosslab Bash record to the built release hook binary (`target/release/claude-code-permissions-hook run --config ~/.config/claude-code-permissions-hook.toml`), the same invocation shape `tools/run_command_decisions.py` uses for fixture rows.
+
 ## 2026-06-26
 
 ### Additions and New Features

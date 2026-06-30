@@ -12,7 +12,7 @@ import os
 import file_utils
 
 # Hard ceiling on the guide size, in characters (bytes for ASCII content).
-MAX_CHARS = 40000
+MAX_CHARS = 30000
 
 
 #============================================

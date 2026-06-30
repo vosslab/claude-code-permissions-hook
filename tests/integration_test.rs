@@ -2,29 +2,19 @@
 //!
 //! These tests use the library's public API directly to test rule matching
 //! logic without spawning a subprocess.
+//!
+//! Decision-table coverage (Bash/Read/Write/Edit/Glob/Grep allow-deny-passthrough
+//! cases) lives in `tests/command_decisions.tsv`, run by
+//! `tools/run_command_decisions.py` against both the live and example configs.
+//! This file keeps only the API-level tests that the decision table does not
+//! cover: config validation, decomposer compound/loop behavior, and the
+//! `HookResult` constructors.
 
 use std::path::PathBuf;
-use std::sync::Once;
 
 use claude_code_permissions_hook::{
     Decision, HookInput, HookResult, process_hook_input, validate_config,
 };
-
-/// Materialize the `/tmp/cck-test/` tree referenced by checked-in fixtures.
-///
-/// The path-existence pre-check denies Read/Edit/Glob/Grep calls whose target
-/// is missing, so fixtures cannot reference paths that do not exist on disk.
-/// Runs exactly once per test process via `Once`.
-static SETUP_TEST_PATHS: Once = Once::new();
-
-fn ensure_test_paths() {
-    SETUP_TEST_PATHS.call_once(|| {
-        let root = std::path::Path::new("/tmp/cck-test");
-        std::fs::create_dir_all(root.join("myproject")).expect("create cck-test root");
-        std::fs::write(root.join("main.rs"), b"// test file\n").expect("write main.rs");
-        std::fs::write(root.join("myproject/README.md"), b"# test\n").expect("write README.md");
-    });
-}
 
 /// Helper to get the path to the test config
 fn config_path() -> PathBuf {
@@ -39,105 +29,6 @@ fn example_config_path() -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("example.toml");
     path
-}
-
-/// Helper to get path to a test JSON file
-fn test_json_path(name: &str) -> PathBuf {
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.push("tests");
-    path.push("fixtures");
-    path.push(name);
-    path
-}
-
-/// Load a test JSON file and parse it as HookInput
-fn load_test_input(filename: &str) -> HookInput {
-    let json = std::fs::read_to_string(test_json_path(filename))
-        .unwrap_or_else(|_| panic!("Failed to read test file: {}", filename));
-    serde_json::from_str(&json)
-        .unwrap_or_else(|_| panic!("Failed to parse test file: {}", filename))
-}
-
-#[test]
-fn test_read_allowed() {
-    ensure_test_paths();
-    let input = load_test_input("read_allowed.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "Read within allowed path should be allowed"
-    );
-    assert!(
-        result.reason.is_some(),
-        "Allow decision should have a reason"
-    );
-}
-
-#[test]
-fn test_read_path_traversal_denied() {
-    ensure_test_paths();
-    let input = load_test_input("read_path_traversal.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Deny,
-        "Path traversal should be denied"
-    );
-    assert!(
-        result.reason.is_some(),
-        "Deny decision should have a reason"
-    );
-}
-
-#[test]
-fn test_bash_injection_denied() {
-    let input = load_test_input("bash_injection.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Deny,
-        "Shell injection attempt should be denied"
-    );
-    assert!(
-        result.reason.is_some(),
-        "Deny decision should have a reason"
-    );
-}
-
-#[test]
-fn test_bash_allowed() {
-    let input = load_test_input("bash_allowed.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "cargo test should be allowed"
-    );
-    assert!(
-        result.reason.is_some(),
-        "Allow decision should have a reason"
-    );
-}
-
-#[test]
-fn test_unknown_tool_passthrough() {
-    let input = load_test_input("unknown_tool.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Passthrough,
-        "Unknown tool should passthrough"
-    );
-    assert!(
-        result.reason.is_none(),
-        "Passthrough should not have a reason"
-    );
 }
 
 #[test]
@@ -246,159 +137,6 @@ fn test_decomposer_for_loop_dangerous_body() {
         result.decision,
         Decision::Deny,
         "For loop with rm in body should be denied"
-    );
-}
-
-// --- New fixture tests for compound commands, tool-only, Glob/Grep, Edit ---
-
-#[test]
-fn test_bash_echo_simple_allowed() {
-    let input = load_test_input("bash_echo_simple.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "Simple echo should be allowed by utilities rule"
-    );
-}
-
-#[test]
-fn test_bash_compound_and_allowed() {
-    let input = load_test_input("bash_compound_and.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "Safe compound command (echo && echo) should be allowed"
-    );
-}
-
-#[test]
-fn test_bash_compound_or_allowed() {
-    let input = load_test_input("bash_compound_or.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "Safe compound command (echo || echo) should be allowed"
-    );
-}
-
-#[test]
-fn test_bash_rm_chained_denied() {
-    let input = load_test_input("bash_rm_chained.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Deny,
-        "Chained rm command should be denied by \\brm\\b deny rule"
-    );
-}
-
-#[test]
-fn test_bash_for_loop_allowed() {
-    let input = load_test_input("bash_for_loop.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "For loop should be allowed (for is in utilities list)"
-    );
-}
-
-#[test]
-fn test_bash_while_loop_allowed() {
-    let input = load_test_input("bash_while_loop.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    // Both 'true' and 'sleep' are in SAFE_CMDS, so decomposed leaves are all allowed
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "While loop with safe body should be allowed"
-    );
-}
-
-#[test]
-fn test_webfetch_tool_only_allowed() {
-    let input = load_test_input("webfetch_allowed.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "WebFetch should be allowed by tool-only rule"
-    );
-    assert!(
-        result
-            .reason
-            .as_ref()
-            .unwrap()
-            .contains("tool-only"),
-        "Reason should mention tool-only: {:?}",
-        result.reason
-    );
-}
-
-#[test]
-fn test_glob_allowed_path() {
-    ensure_test_paths();
-    let input = load_test_input("glob_allowed.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "Glob within allowed path should be allowed"
-    );
-    assert!(
-        result
-            .reason
-            .as_ref()
-            .unwrap()
-            .contains("path:"),
-        "Reason should mention path field: {:?}",
-        result.reason
-    );
-}
-
-#[test]
-fn test_grep_allowed_path() {
-    ensure_test_paths();
-    let input = load_test_input("grep_allowed.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "Grep within allowed path should be allowed"
-    );
-    assert!(
-        result
-            .reason
-            .as_ref()
-            .unwrap()
-            .contains("path:"),
-        "Reason should mention path field: {:?}",
-        result.reason
-    );
-}
-
-#[test]
-fn test_edit_allowed_path() {
-    ensure_test_paths();
-    let input = load_test_input("edit_allowed.json");
-    let result = process_hook_input(&config_path(), &input).expect("Processing should succeed");
-
-    assert_eq!(
-        result.decision,
-        Decision::Allow,
-        "Edit within allowed path should be allowed"
     );
 }
 

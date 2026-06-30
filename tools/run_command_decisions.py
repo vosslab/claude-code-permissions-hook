@@ -71,7 +71,7 @@ def decide_with(cfg_path: str, tool_name: str, tool_input: dict) -> tuple:
 		"hook_event_name": "PreToolUse",
 		"tool_name": tool_name,
 		"tool_input": tool_input,
-		"cwd": "/Users/korny/Dropbox/prj/test",
+		"cwd": "/Users/<upstream-user>/Dropbox/prj/test",
 	}
 	json_input = json.dumps(hook_input)
 	result = subprocess.run(
