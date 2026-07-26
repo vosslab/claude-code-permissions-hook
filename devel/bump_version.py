@@ -958,6 +958,34 @@ def update_pyproject(text: str, sections: list[str], new_version: str) -> tuple[
 
 #============================================
 
+def normalize_cargo_version(version: str) -> str:
+	"""Convert a supported repo version to Cargo's SemVer representation.
+
+	Args:
+		version (str): Repo version string.
+
+	Returns:
+		str: Three-part SemVer without leading zeroes.
+	"""
+	details = parse_version_details(version)
+	base = f"{details['major']}.{details['minor']}.{details['patch']}"
+	if not details["pre_tag"]:
+		return base
+
+	tag_map = {
+		"a": "alpha",
+		"alpha": "alpha",
+		"b": "beta",
+		"beta": "beta",
+		"rc": "rc",
+	}
+	tag = tag_map[details["pre_tag"]]
+	pre_num = details["pre_num"] if details["pre_num"] is not None else 0
+	cargo_version = f"{base}-{tag}.{pre_num}"
+	return cargo_version
+
+#============================================
+
 def normalize_target_version(entry: dict, new_version: str) -> str:
 	"""Normalize the target version for entries without a patch segment.
 
@@ -969,13 +997,28 @@ def normalize_target_version(entry: dict, new_version: str) -> str:
 		str: Adjusted version string.
 	"""
 	if entry["kind"] in ("cargo_toml", "cargo_lock"):
-		if re.fullmatch(r"\d+\.\d+", new_version):
-			return new_version + ".0"
+		return normalize_cargo_version(new_version)
 	if entry.get("patch_optional") and new_version.endswith(".0"):
 		short_version = new_version.replace(".0", "", 1)
 		if SHORT_PEP440_PATTERN.match(short_version):
 			return short_version
 	return new_version
+
+#============================================
+
+def entry_matches_target(entry: dict, new_version: str) -> bool:
+	"""Check whether an entry already contains its normalized target version.
+
+	Args:
+		entry (dict): Version entry metadata.
+		new_version (str): Repo target version.
+
+	Returns:
+		bool: True when no update is needed.
+	"""
+	target_version = normalize_target_version(entry, new_version)
+	matches = entry["version"] == target_version
+	return matches
 
 #============================================
 
@@ -1153,7 +1196,7 @@ def main() -> None:
 	if base_version_override:
 		base_version = base_version_override
 		base_version_display = base_version
-	elif explicit_version and args.update_all:
+	elif explicit_version:
 		versions = sorted(set(entry["version"] for entry in entries))
 		if len(versions) == 1:
 			base_version = versions[0]
@@ -1184,8 +1227,8 @@ def main() -> None:
 	print(f"Base version: {base_version_display}")
 	print(f"New version: {new_version}")
 
-	if args.update_all:
-		if all(entry["version"] == new_version for entry in entries):
+	if explicit_version or args.update_all:
+		if all(entry_matches_target(entry, new_version) for entry in entries):
 			print("New version matches current version. Nothing to do.")
 			return
 	else:
@@ -1193,7 +1236,7 @@ def main() -> None:
 			print("New version matches current version. Nothing to do.")
 			return
 
-	if args.update_all:
+	if explicit_version or args.update_all:
 		selected = list(entries)
 		skipped = []
 	else:
