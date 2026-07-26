@@ -59,7 +59,7 @@ fn check_read(input: &HookInput) -> Option<String> {
                 // Directory passed to Read -- deny with a helpful steer.
                 Some(format!(
                     "Read targets a file, not a directory. Use `ls <dir>` or \
-                     `git ls-files <pathspec>` to list directory contents. \
+                     `rg --files <dir>` to list directory contents. \
                      Path is a directory: {}.",
                     abs.display()
                 ))

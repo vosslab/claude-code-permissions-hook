@@ -61,11 +61,11 @@ tool = "Bash"
 command_regex = "^bash\\s+-[a-zA-Z]*c[a-zA-Z]*\\s+"
 reason = "bash -c / bash -lc is redundant inside the Bash tool. Run the command directly."
 
-# Deny find - use git ls-files or ls instead
+# Deny find - use rg --files or ls instead
 [[deny]]
 tool = "Bash"
 command_regex = "^find\\b"
-reason = "Use git ls-files '<pathspec>' or ls <dir> for file listing. For broad searches, write a _temp.py script with os.walk() or similar. find is denied to keep shell-side exploration bounded."
+reason = "Use `rg --files -g '<glob>'` or `ls <dir>` for file listing. For broad searches, write a `_temp.py` script with `os.walk()` or similar. This keeps shell-side exploration bounded."
 
 # Deny cat/head/tail when reading files (has an absolute path argument)
 # The [^>|]*/ avoids matching paths in redirects like 'cat file >> /tmp/out'
@@ -78,7 +78,7 @@ reason = "Use the Read tool instead of cat/head/tail. Read supports offset and l
 [[deny]]
 tool = "Bash"
 command_regex = "^(grep|rg)\\b.*\\s/\\S"
-reason = "Use piped grep/rg on bounded command output (e.g., git ls-files <pathspec> | grep pat), or read a single file with the Read tool and process it in a _temp.py script. grep/rg on file paths is denied to keep exploration bounded."
+reason = "Use `rg --files -g '<glob>'` to identify candidates, then read a targeted file with the Read tool or process it in a `_temp.py` script. This keeps exploration bounded."
 
 # Deny sed -n for line extraction - use Read with offset and limit
 [[deny]]

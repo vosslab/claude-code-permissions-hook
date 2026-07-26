@@ -19,7 +19,7 @@ protected_refs = ["refs/heads/main", "refs/heads/master"]
 [variables]
 # --- Safe command groups (harmless utilities only, NO runtimes) ---
 # Text processing (read/transform stdin or files, no side effects)
-# awk is intentionally excluded -- denied entirely (steered to git ls-files + Read, piped grep/rg, or _temp.py).
+# awk is intentionally excluded from auto-allow and falls through to user approval.
 TEXT_CMDS = "cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs"
 # Search and query (find content within text or structured data)
 # Note: bare `grep`/`rg` leaves match the dedicated `^(grep|rg)\b` allow rule
@@ -468,7 +468,7 @@ reason = "Run a command after the assignment (e.g. `FOO=x command ...`), or set 
 [[deny]]
 tool = "Bash"
 command_regex = "^\\s*(null)?\\s*$"
-reason = "Provide a real Bash command (e.g. `pwd`, `ls`, `git status`). Empty, whitespace-only, or literal-`null` commands are rejected because they are no-ops."
+reason = "Provide a real Bash command such as `pwd` or `ls`. Empty, whitespace-only, and literal-`null` commands are rejected because they are no-ops."
 
 # Allow `VAR=$!`, `VAR=$?`, `VAR=$$` -- dev-server lifecycle PID/status capture.
 # Examples: `DEVPID=$!`, `SERVER_PID=$!`, `STATUS=$?`. Narrow shape:
@@ -601,7 +601,7 @@ reason = "Use a workspace path under `~/<workspace>/...` or a narrow Claude subt
 [[deny]]
 tool = "Bash"
 command_regex = "\\bxargs\\b[^|;&]*\\b(rm|chmod|chown|mv|sudo)\\b"
-reason = "Destructive `xargs` pipelines (`xargs rm`, `xargs -0 rm`, `xargs -I{} rm`, `xargs chmod`, `xargs chown`, `xargs mv`, `xargs sudo`) are denied. List candidates with `find <safe-root> ...` or `git ls-files <pathspec>`, review, then run the mutation as a separate explicit command on the chosen paths."
+reason = "Destructive `xargs` pipelines (`xargs rm`, `xargs -0 rm`, `xargs -I{} rm`, `xargs chmod`, `xargs chown`, `xargs mv`, `xargs sudo`) are denied. List candidates with `rg --files <safe-root>` (add `-g '<glob>'` as needed), review them, then run the mutation as a separate explicit command on the chosen paths."
 
 # D4 -- bare `find` (no args). Auto-deny rather than passthrough: an
 # unbounded recursive listing at cwd is almost never what the agent wants.
@@ -641,14 +641,14 @@ command_exclude_regex = "\\s-(delete|exec|execdir|ok|okdir|fprintf|fprint|fls|pr
 
 # Deny `git grep`. Pattern: agents who hit the grep deny look for a Bash
 # escape hatch and reach for `git grep`, which would keep every search
-# shell-side instead of git ls-files + Read; piped grep/rg stays allowed.
+# shell-side instead of rg --files + Read; piped grep/rg stays allowed.
 # Uses ${GIT_INVOCATION} to match every git invocation form (bare git,
 # command git, env-prefixed, absolute path /usr/bin/git, -C/-c/--git-dir
 # /--work-tree flags); a narrower regex would leave obvious bypasses.
 [[deny]]
 tool = "Bash"
 command_regex = ".*${GIT_INVOCATION}grep\\b"
-reason = "Use `git ls-files <pathspec>` to list candidate files, then use the Read tool on targeted files. `grep` and `rg` remain useful as pipeline filters on already-bounded command output (`git ls-files | grep pat`). For broad or structured content searches write a `_temp.py` helper that starts from a bounded candidate list (e.g. `git ls-files`) and run it with `source source_me.sh && python3 _temp.py`. `git grep` is denied to keep repo content search on the bounded workflow: list candidates first, then inspect targeted files. Scope-control rule, not anti-grep."
+reason = "Use `rg --files -g '<glob>'` to list candidate files, then use the Read tool on targeted files. `grep` and `rg` remain useful as pipeline filters on already-bounded command output (`rg --files | grep pat`). For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list such as `rg --files` and run it with `source source_me.sh && python3 _temp.py`. This keeps repo content search bounded: list candidates first, then inspect targeted files. Scope-control rule, not anti-grep."
 
 # Deny Claude Code tool names typed as Bash commands. Pattern: agents read
 # steering messages and literally paste tool names like 'Grep ...' or
@@ -659,7 +659,7 @@ reason = "Use `git ls-files <pathspec>` to list candidate files, then use the Re
 [[deny]]
 tool = "Bash"
 command_regex = "^\\s*(Grep|Read|Glob|Edit|Write|Task|WebFetch|WebSearch)\\b"
-reason = "Invoke the actual tool, not its name typed into Bash. `Read` reads a file; `Edit`/`Write` modify files; `Task`/`WebFetch`/`WebSearch` are first-class tool calls. For file search use `git ls-files <pathspec>` plus the Read tool. Typing `Grep`, `Glob`, `Read`, `Edit`, `Write`, `Task`, `WebFetch`, or `WebSearch` into Bash runs whatever (if anything) is on PATH by that name, not the Claude Code tool."
+reason = "Invoke the actual tool, not its name typed into Bash. `Read` reads a file; `Edit`/`Write` modify files; `Task`/`WebFetch`/`WebSearch` are first-class tool calls. For file search use `rg --files -g '<glob>'`, then use the Read tool on targeted files. Typing `Grep`, `Glob`, `Read`, `Edit`, `Write`, `Task`, `WebFetch`, or `WebSearch` into Bash runs whatever (if anything) is on PATH by that name, not the Claude Code tool."
 
 # Deny cat/head/tail when reading files (any path-shaped argument).
 # Pipeline leaves like 'head -5' (no file, consuming stdin) are not matched.
@@ -671,7 +671,7 @@ reason = "Invoke the actual tool, not its name typed into Bash. `Read` reads a f
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>]*/"
-reason = "Invoke the Read tool: file_path=<path>, with optional offset and limit. For piped stdout, `... | head -5`, `... | tail -5`, `... | cat` are still allowed. `cat`/`head`/`tail` against a file path is rejected because Read provides line numbers and bounded slicing."
+reason = "Invoke the Read tool: file_path=<path>, with optional offset and limit. For piped stdout, `... | head -5`, `... | tail -5`, and `... | cat` remain allowed. Direct file reads with `cat`, `head`, or `tail` are rejected because Read provides line numbers and bounded slicing."
 
 # Deny grep/rg when searching files (any path-shaped argument, relative or absolute).
 # Pipeline leaves like 'grep pattern' (no file, filtering stdin) are not matched.
@@ -746,42 +746,28 @@ reason = "Use the bare PATH form (e.g. `whoami`, `xxd`, `cat ...`) rather than t
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^>]*/"
-reason = "Invoke the Read tool: file_path=<path>, offset=<start>, limit=<count> to extract a line range from a file. For piped stdout, `... | sed -n '10,20p'` is still allowed. `sed -n` against a file path is rejected because Read does file-range extraction directly."
-
-# Deny awk entirely (every leaf, including pipeline leaves -- the decomposer
-# splits on '|' so a `... | awk ...` leaf is matched here too). Unlike the
-# grep/sed denies, this has no file-path guard: awk is denied even as a stdin
-# filter. Rationale: in passthrough-log review, agent awk usage was almost
-# always line-matching ("find lines matching X, print them"), which is exactly
-# what git ls-files + Read or a _temp.py helper covers, and the awk attempts
-# were consistently overcomplicated. awk's '/regex/' syntax also makes a
-# reliable file-vs-stdin guard impractical.
-# Covers awk, gawk, mawk via command/env prefixes and absolute paths.
-[[deny]]
-tool = "Bash"
-command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(awk|gawk|mawk)\\b"
-reason = "For line-matching in files, use `git ls-files <pathspec>` to identify candidates and use the Read tool on targeted files. Piped `grep` or `rg` on already-bounded stdout stays allowed (`<allowed cmd> | grep pat`, `<allowed cmd> | rg pat`). For field extraction from piped output use `cut`. For structured parsing write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `awk`/`gawk`/`mawk` is denied including pipeline leaves -- no pipe exception."
+reason = "Invoke the Read tool: file_path=<path>, offset=<start>, limit=<count> to extract a line range from a file. For piped stdout, `... | sed -n '10,20p'` remains allowed. `sed -n` against a file path is rejected because Read does file-range extraction directly."
 
 # Deny bash/sh/zsh -n shell-script syntax checks. Steers agents away from using
 # shell as a script-analysis tool. Inspect with the Read tool instead.
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(bash|sh|zsh)\\s+-n\\b"
-reason = "Inspect the script with the Read tool. To execute, use `bash script.sh` or ask for user approval. `bash`/`sh`/`zsh -n` syntax-check is rejected; the shell is not the right tool for script analysis."
+reason = "For a literal command, use `echo '<command>'` to display it without execution. For a script file, inspect it with the Read tool. `bash`, `sh`, and `zsh -n` are rejected because invoking a shell is a more powerful operation than inspection."
 
-# Deny `less <file>` -- it is `cat`-with-pager and should route through Read.
+# Deny `less <file>` -- it is `cat` with a pager and should route through Read.
 # The pipeline form (`... | less`) does not match (no path arg).
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}less\\b[^>]*/"
-reason = "Invoke the Read tool: file_path=<path>, with optional offset and limit. `less <file>` is rejected because Read provides line numbers and bounded slicing; the pipeline form `... | less` is not the same shape and is not auto-allowed either."
+reason = "Invoke the Read tool: file_path=<path>, with optional offset and limit. `less <file>` is rejected because Read provides line numbers and bounded slicing; the pipeline form `... | less` is not auto-allowed."
 
 # Deny pcregrep/ack/ag with a file path argument -- mirrors the grep/rg
 # file-arg deny so agents do not switch grep variants to bypass scope control.
 [[deny]]
 tool = "Bash"
 command_regex = "^${TOOL_PREFIX}${TOOL_PATH}(pcregrep|ack|ag)\\b[^>]*/"
-reason = "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed."
+reason = "Use `rg --files -g '<glob>'` to identify candidate files, then use the Read tool on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed."
 
 # Deny `node -e` / `node --eval` inline JS. Same risk profile as
 # `python -c`: arbitrary inline code, hard to lint/audit, can hide
@@ -1081,14 +1067,13 @@ command_exclude_regex = "${NO_CMD_SUB}"
 # -------------------------------------------------------------------
 
 # Broad python allow, with `-m <module>` carve-outs so machine-changing modules
-# (`pip`, `venv`, `ensurepip`) fall through to user approval, and `json.tool`
-# with a file path falls through to passthrough so the agent uses the Read tool
-# instead. Other `-m <module>` shapes (`pytest`, `pyflakes`, `http.server`,
-# `json.tool` on stdin, `timeit`, `unittest`) remain auto-allowed by this rule.
+# (`pip`, `venv`, `ensurepip`) fall through to user approval. Other module
+# invocations (`pytest`, `pyflakes`, `http.server`, `json.tool`, `timeit`,
+# `unittest`) remain auto-allowed by this rule.
 [[allow]]
 tool = "Bash"
 command_regex = "^(python3?|/opt/homebrew/opt/python@3\\.12/bin/python3\\.12|PYTHONPATH=)\\s?"
-command_exclude_regex = "${NO_CMD_SUB}|\\s+-m\\s+(pip|venv|ensurepip)\\b|\\s+-m\\s+json\\.tool\\s+\\S"
+command_exclude_regex = "${NO_CMD_SUB}|\\s+-m\\s+(pip|venv|ensurepip)\\b"
 
 # Allow homebrew python running .py files directly (but not -c)
 [[allow]]
@@ -1397,8 +1382,8 @@ tool = "Bash"
 command_regex = "^cd\\s+[\"']?\\$\\(\\s*git\\s+rev-parse\\s+--show-toplevel\\s*\\)[\"']?\\s*$"
 
 # Allow `xargs <flags>* (grep|egrep|fgrep|rg) ...` as a pipeline leaf.
-# Passthrough audit (2026-05-15): `git ls-files <pathspec> | xargs grep
-# PAT` is the canonical bulk-search pattern and was hitting passthrough
+# Passthrough audit (2026-05-15): bulk searches using a candidate list
+# piped to `xargs grep PAT` were hitting passthrough
 # because xargs reads its argv from stdin (no path arg visible). When
 # this leaf is reached via pipe, the upstream leaf has already been
 # evaluated against allow/deny rules, so this allow only completes the

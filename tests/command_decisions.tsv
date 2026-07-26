@@ -132,6 +132,9 @@ allow	swift build --package-path ~/nsh/swift-usb-imager
 # leaves allow (cd, swift test, echo), so the chain allows. $? is not $(.
 allow	cd /tmp/_swifttest_scaffold && swift test 2>&1; echo "EXIT: $?"
 allow	cd /Users/vosslab/nsh/swift-usb-imager && swift build 2>&1
+# The configured chain limit allows five leaves and denies the sixth.
+allow	pwd; pwd; pwd; pwd; pwd
+deny	pwd; pwd; pwd; pwd; pwd; pwd
 # Inline Swift denied outright (mirrors python -c / node -e). Recovery:
 # write _temp.swift or run swift build/test directly.
 deny	swift -e 'import Foundation; print("ok")'
@@ -425,23 +428,17 @@ allow	printf 'a\nb\n' | tail -1
 allow	seq 1 5 | grep 3
 allow	seq 1 10 | wc -l
 
-# --- awk denied entirely (steered to the Grep tool) ---
-# awk was removed from TEXT_CMDS and given an unconditional deny. Both the
-# lead-command form and pipeline leaves are caught (the decomposer splits on
-# '|'). No file-path guard: awk as a stdin filter is denied too.
-deny	awk '/foo/{print}' docs/x.md
-deny	awk 'NR==1' /tmp/x
-deny	awk 'NR==1' </tmp/x
-deny	printf 'a b\n' | awk '{print $2}'
-deny	/usr/bin/awk '{print}' file.md
-deny	command awk '{print}' file.md
-deny	gawk '{print}' /tmp/x
-deny	mawk '{print}' /tmp/x
-# Pure awk-pipeline-leaf coverage: the source leaf (echo) is allowed, so a
-# deny here can only come from the awk leaf. (The earlier conflated row
-# `cat /tmp/x.log | awk` was removed -- the cat leaf denied independently,
-# masking which rule fired.)
-deny	echo a b | awk '{print $1}'
+# --- awk requires normal user approval ---
+# awk remains outside TEXT_CMDS and falls through to passthrough.
+passthrough	awk '/foo/{print}' docs/x.md
+passthrough	awk 'NR==1' /tmp/x
+passthrough	awk 'NR==1' </tmp/x
+passthrough	printf 'a b\n' | awk '{print $2}'
+passthrough	/usr/bin/awk '{print}' file.md
+passthrough	command awk '{print}' file.md
+passthrough	gawk '{print}' /tmp/x
+passthrough	mawk '{print}' /tmp/x
+passthrough	echo a b | awk '{print $1}'
 
 # --- File-path forms of dedicated-tool deny rules ---
 deny	cat /tmp/x.log
@@ -457,8 +454,8 @@ allow	/usr/bin/find . -name *.py
 deny	sed -n 1,5p /tmp/x.txt
 
 # --- Bash-side escape hatches named in the redirect-style deny reasons ---
-# `ls <dir>` and `git ls-files <pathspec>` are the allowed Bash forms when a
-# tool call is not viable (e.g. needing a shell-pipeline file list).
+# `ls <dir>` and `rg --files <dir>` are the preferred Bash forms when a tool
+# call is not viable. Existing file-listing allows remain regression covered.
 allow	ls /tmp
 allow	ls docs/
 allow	git ls-files
@@ -1644,11 +1641,10 @@ allow	STATUS=$?
 allow	echo "exit=$?"
 # python3 -m http.server is auto-allowed by the broad python rule (and stays
 # allowed under the narrowed exclude). pip/venv stay passthrough (machine-
-# changing). json.tool with a file path arg is passthrough (use Read instead);
-# json.tool without args (stdin form) remains allow via the broad rule.
+# changing). json.tool with or without a file path remains auto-allowed.
 allow	python3 -m http.server 8000
 allow	python3 -m http.server --directory dist 8766 >/tmp/_httpd.log 2>&1 &
-passthrough	python3 -m json.tool /tmp/x.json
+allow	python3 -m json.tool /tmp/x.json
 passthrough	python3 -m pip install requests
 passthrough	python3 -m venv .venv
 # curl is broad-allowed; only the curl|interpreter RCE shape stays denied.

@@ -68,7 +68,7 @@ Commands with more than **5** chained sub-commands are denied automatically.
 | --- | --- | --- |
 | `cat /path/to/file`, `head -20 /path`, `tail -20 /path` | Read tool with `file_path`, `offset`, `limit` | `... \| cat`, `... \| head -5`, `... \| tail -5` (pipeline, no file arg) |
 | `grep root /etc/passwd`, `rg pat /usr/...` (out-of-zone), `/usr/bin/grep ...` (abs binary), `egrep`/`fgrep` | read a known file with the Read tool, or narrow to a relative/workspace path | `grep -n pat src/file`, `rg pat docs/`, `grep foo /tmp/x`, `grep -n foo ~/<workspace>/repo/x`, `... \| grep pat` |
-| `find /etc -name '*.conf'`, `find . -delete`, `find /Users` (unsafe shapes) | Use bounded read-only `find` in a safe path zone (`.`, `/tmp`, `~/<workspace>/...`, `/Users/<me>/<workspace>/...`). For repo content, `git ls-files <pathspec>` is still preferred. | `find . -name '*.py'`, `find /tmp -type f`, `find ~/<workspace>/repo -type f` |
+| `find /etc -name '*.conf'`, `find . -delete`, `find /Users` (unsafe shapes) | Use `rg --files -g '<glob>'` for ordinary candidate discovery, or bounded read-only `find` in a safe path zone when filesystem metadata matters. | `rg --files -g '*.py'`, `find /tmp -type f`, `find ~/<workspace>/repo -type f` |
 | `sed -n '10,20p' file.txt` | Read tool with `offset=10`, `limit=11` | `... \| sed -n '10,20p'` (pipeline) |
 
 The deny rules cover all binary variants (alternate names, absolute paths like
@@ -168,10 +168,10 @@ These commands are allowed as single commands. Command substitution is blocked, 
 `unlink`, `wc`, `whoami`, `xcrun`, `xxd`
 
 Note: Some of these (like `cat`, `head`, `tail`) deny when used with a file path
-argument -- use the Read tool for file inspection, and `git ls-files <pathspec>`
+argument -- use the Read tool for file inspection, and `rg --files -g '<glob>'`
 plus targeted Read for file search; piped `grep`/`rg` on already-bounded stdout
-stays allowed. `awk` is denied entirely; use `cut` for field extraction or a
-`_temp.py` helper.
+stays allowed. `awk` requires normal user approval; use `cut` for simple field
+extraction or a `_temp.py` helper for structured parsing.
 
 ### Local runtimes
 
@@ -419,7 +419,7 @@ let the human own machine-changing and history-changing actions.
 | --- | --- |
 | Read a file | Read tool with `file_path`/`offset`/`limit`, not `cat`/`head`/`tail`/`sed <file>` |
 | Search file contents | `grep`/`rg` on a relative or workspace path (`grep -rn pat src/`); for an out-of-zone path, Read a known file or narrow the path |
-| List files | `ls <dir>` or `git ls-files <pathspec>`; read-only `find` in a safe path zone |
+| List files | `rg --files -g '<glob>'` or `ls <dir>`; read-only `find` in a safe path zone when filesystem metadata matters |
 | Run inline code | Write `_temp.py` / `_temp.mjs` and run it, not `python -c` / `node -e` / heredocs |
 | Run a loop | Put it in `_temp.sh` / `_temp.py`, not inline `for`/`while` |
 | Rename or move a file | `git mv` for tracked files; `cp` plus a `_`-scratch otherwise |
@@ -460,7 +460,7 @@ cwd fallback is trusted).
 | Condition | Reason |
 | --- | --- |
 | Read target missing | `Verify the file path before retrying. Read target does not exist: <path>.` |
-| Read target is a directory | ``Read targets a file, not a directory. Use `ls <dir>` or `git ls-files <pathspec>` to list directory contents. Path is a directory: <path>.`` |
+| Read target is a directory | ``Read targets a file, not a directory. Use `ls <dir>` or `rg --files <dir>` to list directory contents. Path is a directory: <path>.`` |
 | Edit / MultiEdit both missing | `Create the parent directory first or choose an existing path. Edit target and parent directory are both missing: <path>; parent: <parent>.` |
 | Glob path missing or not a directory | `Choose an existing search directory before retrying. Glob path does not exist as a directory: <path>.` |
 | Grep path missing | `Choose an existing file or directory before retrying. Grep path does not exist: <path>.` |
@@ -477,9 +477,9 @@ errors emit "could not confirm" so the message stays accurate.
   could not find and, for Edit, which parent directory was also missing.
 - If the path was a typo, fix it. If the path belongs to a different
   working directory, set `cwd` correctly or use an absolute path.
-- For Read of a directory, use `ls <dir>` or `git ls-files <pathspec>`
-  to list contents. For Glob with a file argument, switch to Read for a
-  single file or `git ls-files <pathspec>` to list candidates.
+- For Read of a directory, use `ls <dir>` or `rg --files <dir>` to list
+  contents. For Glob with a file argument, switch to Read for a single file or
+  `rg --files -g '<glob>'` to list candidates.
 - For a brand-new file you intend to create, prefer `Write`; the pre-check
   is exempt for `Write`. `Edit` of a brand-new file is also accepted as long
   as the parent directory already exists.
@@ -528,7 +528,7 @@ interactive UI dialogs, causing blank answers or skipped consent screens.
 - Always use `source source_me.sh && python3` for Python execution
 - Use the Read tool for file inspection (offset / limit available)
 - Search file contents with `grep`/`rg` directly on a relative or workspace path (`grep -rn pat src/`); the Grep tool is not available here
-- Use `ls <dir>` or `git ls-files <pathspec>` to list files
+- Use `rg --files -g '<glob>'` or `ls <dir>` to list files
 - Write scratch code to `_temp.py` or `_temp.sh` (underscore prefix = safe to delete)
 - Keep compound commands under 5 chained sub-commands
 - Destructive `xargs` pipelines (`xargs rm`, `xargs chmod`, `xargs chown`, `xargs mv`, `xargs sudo`) stay denied
@@ -540,7 +540,7 @@ interactive UI dialogs, causing blank answers or skipped consent screens.
 Quick rules of thumb (each is detailed in the per-command sections above):
 use `Read`/`Edit`/`Write` tool calls, not `cat`/`sed`/`printf`; search with
 `grep`/`rg` on a relative or workspace path (not `/etc`, not the `Grep` tool);
-list with `ls` or `git ls-files`; run Python via `source source_me.sh &&
+list with `rg --files` or `ls`; run Python via `source source_me.sh &&
 python3 script.py` (no `-c`); write loops/inline code to `_temp.py`/`_temp.sh`;
 rename with `git mv`; delete only `_temp*`/`/tmp` paths; stage to `/tmp` for
 `ffmpeg`/`convert` and prefer `mediainfo` over `ffprobe`.

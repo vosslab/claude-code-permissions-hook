@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-07-26
+
+### Behavior or Interface Changes
+
+- Relaxed `awk`, `gawk`, and `mawk` from deny to passthrough in the example and
+  live Claude policies. They remain outside the safe-command auto-allow list.
+- Allowed `python -m json.tool` with either standard input or a file argument
+  by removing the file-argument carve-out from the broad Python allow.
+- Replaced candidate-discovery steering based on `git ls-files` with
+  `rg --files`. Claude recovery continues from the candidate list to the Read
+  tool. The hardcoded Read-directory recovery in `src/path_check.rs` and the
+  maintained usage guide now use the same candidate-listing convention.
+- Kept `python -c`, `bash`/`sh`/`zsh -n`, the command-chain limit, absolute
+  safe-utility paths, and the dedicated `/usr/bin/time` rule enforced.
+
+### Decisions and Failures
+
+- Treat passthrough as the last-ditch result for genuinely unresolved commands.
+  Recurring shapes should become a justified allow or a deny with a positive,
+  immediately usable recovery path.
+- Preserved Claude-specific Read steering rather than minimizing its textual
+  diff with Codex, which has no Read tool. Tool availability is a justified
+  policy difference.
+- Kept deny and allow regexes unchanged while improving comments and steering,
+  except for the explicitly approved `awk` and `json.tool` behavior changes.
+
+### Developer Tests and Notes
+
+- Updated the command-decision fixture for `awk` passthrough,
+  `json.tool FILE` allow, and the five-leaf/six-leaf chain-limit boundary.
+
 ## 2026-06-30
 
 ### Additions and New Features
