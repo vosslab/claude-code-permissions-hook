@@ -428,17 +428,39 @@ allow	printf 'a\nb\n' | tail -1
 allow	seq 1 5 | grep 3
 allow	seq 1 10 | wc -l
 
-# --- awk requires normal user approval ---
-# awk remains outside TEXT_CMDS and falls through to passthrough.
-passthrough	awk '/foo/{print}' docs/x.md
-passthrough	awk 'NR==1' /tmp/x
-passthrough	awk 'NR==1' </tmp/x
-passthrough	printf 'a b\n' | awk '{print $2}'
-passthrough	/usr/bin/awk '{print}' file.md
+# --- Graphify local navigation and export ---
+allow	graphify --help
+allow	graphify --version
+allow	graphify --help 2>&1 | head -60
+allow	graphify query "Where are command decisions?" --budget 1500
+allow	graphify explain check_rule_with_context
+allow	graphify affected decompose_command --depth 2
+allow	graphify path decompose_command check_rule_with_context
+allow	graphify export svg
+allow	graphify export callflow-html
+allow	source source_me.sh && graphify export svg 2>&1 | tail -5
+passthrough	graphify update .
+passthrough	graphify clone https://example.invalid/repository.git
+passthrough	graphify label . --backend=claude-cli
+
+# --- awk stdout transforms and capability boundaries ---
+allow	awk '/foo/{print}' docs/x.md
+allow	awk 'NR==1' /tmp/x
+allow	awk 'NR==1' </tmp/x
+allow	printf 'a b\n' | awk '{print $2}'
+allow	ls | awk -F/ 'NF==1'
+deny	/usr/bin/awk '{print}' file.md
 passthrough	command awk '{print}' file.md
 passthrough	gawk '{print}' /tmp/x
 passthrough	mawk '{print}' /tmp/x
-passthrough	echo a b | awk '{print $1}'
+allow	echo a b | awk '{print $1}'
+deny	awk 'BEGIN { system("id") }'
+deny	awk 'BEGIN { print ENVIRON["HOME"] }'
+deny	awk -f program.awk input.txt
+deny	awk '{ print $1 > "out.txt" }' input.txt
+deny	awk '{ print $1 | "sort" }' input.txt
+deny	awk 'BEGIN { "id" | getline line; print line }'
+deny	awk 'BEGIN { getline line < "/etc/passwd"; print line }'
 
 # --- File-path forms of dedicated-tool deny rules ---
 deny	cat /tmp/x.log

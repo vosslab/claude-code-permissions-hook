@@ -19,8 +19,10 @@ protected_refs = ["refs/heads/main", "refs/heads/master"]
 [variables]
 # --- Safe command groups (harmless utilities only, NO runtimes) ---
 # Text processing (read/transform stdin or files, no side effects)
-# awk is intentionally excluded from auto-allow and falls through to user approval.
-TEXT_CMDS = "cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs"
+# Bare awk supports ordinary record and field transforms. Its process, hidden-input,
+# program-loading, environment, and output capabilities are denied below before this
+# allow applies (ASVS 2.1.1, 2.2.1).
+TEXT_CMDS = "awk|cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs"
 # Search and query (find content within text or structured data)
 # Note: bare `grep`/`rg` leaves match the dedicated `^(grep|rg)\b` allow rule
 # (which has no ${NO_CMD_SUB} exclude) BEFORE the ${SAFE_CMDS} catch-all, so the
@@ -49,6 +51,10 @@ PROC_CMDS = "pgrep|ps|sleep|timeout|wait"
 SYS_CMDS = "curl|date|echo|env|export|expr|false|id|nproc|numfmt|printenv|printf|pwd|screencapture|source|test|true|tty|uname|whoami|xcrun|xxd"
 # Build and lint tools (read-only or local-build only, no installs)
 DEV_CMDS = "bandit|make|pyflakes"
+# Local Graphify navigation and its two local export formats are allowed by their
+# dedicated rule below. Other Graphify lifecycle, network, and install actions stay
+# passthrough for user review.
+GRAPHIFY_CMDS = "graphify"
 # Merged safe commands -- harmless utilities only, NO runtimes
 SAFE_CMDS = "${TEXT_CMDS}|${SEARCH_CMDS}|${FORMAT_CMDS}|${INSPECT_CMDS}|${CHECKSUM_CMDS}|${FS_CMDS}|${PROC_CMDS}|${SYS_CMDS}|${DEV_CMDS}"
 # Tools that can write/read freely as long as every path stays under /tmp.
@@ -912,6 +918,15 @@ tool = "Bash"
 command_regex = "(/etc/(passwd|shadow|sudoers|hosts)\\b|~/\\.ssh/|~/\\.aws/credentials\\b|/Users/[^/]+/\\.ssh/|/Users/[^/]+/\\.aws/credentials\\b)"
 reason = "Ask the user for user or host info. Reading system credential or auth files (`/etc/passwd`, `/etc/shadow`, `/etc/sudoers`, `~/.ssh/`, `~/.aws/credentials`) is rejected."
 
+# awk is a programming language, not merely a text filter. Keep its ordinary
+# stdout-only field/record work available, but block the capabilities that execute
+# another program, expose process environment, load another program, hide a new input
+# source, or write through a quoted awk redirect (ASVS 2.1.1, 2.2.1).
+[[deny]]
+tool = "Bash"
+command_regex = "^${TOOL_PREFIX}awk\\b.*(\\bsystem\\s*\\(|\\bENVIRON\\b|\\s(-f|--file|--include|-i)(\\s|=)|@include\\b|@load\\b|\\|\\s*getline\\b|\\bgetline\\s*<|\\b(print|printf)\\b.*(>>?\\s*[\\\"']|\\|\\s*[\\\"']))"
+reason = "Use bare `awk` only for stdout field or record transforms. `system`, `ENVIRON`, program-loading flags, hidden `getline` sources, and awk output redirects are denied because they execute code, expose process data, or write outside the normal tool controls."
+
 # --- Registry-mutating package commands ---
 # These change global state on package registries (or local credential
 # state). Always require explicit human authorization. The cargo allow
@@ -1412,6 +1427,14 @@ command_regex = "^xargs\\b(\\s+-[A-Za-z0-9]+(\\s+\\S+)?)*\\s+(grep|egrep|fgrep|r
 tool = "Bash"
 command_regex = "^(echo|printf|ps|pgrep)\\b"
 command_exclude_regex = "${NO_BACKTICK}"
+
+# Graphify reads the local graph map for repository navigation. Its two observed
+# exports create local derived artifacts; mutating, networked, and installation
+# subcommands remain passthrough by omission.
+[[allow]]
+tool = "Bash"
+command_regex = "^${GRAPHIFY_CMDS}\\s+(--help|--version|query|explain|affected|path|god-nodes|benchmark|diagnose\\s+multigraph|export\\s+(svg|callflow-html))\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
 
 [[allow]]
 tool = "Bash"

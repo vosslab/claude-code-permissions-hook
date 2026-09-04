@@ -2,6 +2,16 @@
 
 ## 2026-09-04
 
+### Behavior or Interface Changes
+
+- Allowed the logged local Graphify navigation commands and the `svg` / `callflow-html`
+  export forms in both policies. Network, lifecycle, installation, and unlisted Graphify
+  actions remain passthrough.
+- Allowed bare `awk` for normal stdout record and field transforms. Added explicit denials
+  with recovery text for subprocess execution, environment reads, program loading, hidden
+  `getline` sources, and quoted output redirects; absolute awk invocation is denied while
+  alternate awk binaries remain passthrough.
+
 ### Fixes and Maintenance
 
 - Synchronized shared style guides, tests, and repository support files from the starter template.

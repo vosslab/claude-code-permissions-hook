@@ -170,8 +170,16 @@ These commands are allowed as single commands. Command substitution is blocked, 
 Note: Some of these (like `cat`, `head`, `tail`) deny when used with a file path
 argument -- use the Read tool for file inspection, and `rg --files -g '<glob>'`
 plus targeted Read for file search; piped `grep`/`rg` on already-bounded stdout
-stays allowed. `awk` requires normal user approval; use `cut` for simple field
-extraction or a `_temp.py` helper for structured parsing.
+stays allowed. Bare `awk` is allowed for ordinary stdout field and record transforms.
+Its process execution, program loading, hidden input, environment reads, and output
+redirection are denied; use a reviewed script or the appropriate file tool for those.
+
+### Graphify
+
+`graphify --help`, `--version`, `query`, `explain`, `affected`, `path`, and the local
+`export svg` / `export callflow-html` forms are allowed. Installation, networking,
+graph mutation, LLM dispatch, and unlisted Graphify actions remain passthrough. Alternate
+or absolute-path `awk` invocations are denied so the bare, reviewed command stays clear.
 
 ### Local runtimes
 
