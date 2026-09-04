@@ -48,6 +48,10 @@ consumer migration direction.
 | [flatten_broken_md_links.py](flatten_broken_md_links.py) | Repair or flatten broken Markdown links. |
 | [dist_clean.sh](dist_clean.sh) | Remove build artifacts, caches, and dependency installs. |
 | [graphify_map_repo.py](graphify_map_repo.py) | Build repository maps and manager orientation for technical maintenance. |
+| [graphify_context_lib.py](graphify_context_lib.py) | Load artifacts and format orientation. |
+| [graphify_docs_lib.py](graphify_docs_lib.py) | Render a browsable repository map. |
+| [graphify_prune_tests.py](graphify_prune_tests.py) | Remove Rust tests before clustering. |
+| [graphify_clean_svg.py](graphify_clean_svg.py) | Shrink an exported SVG figure. |
 
 ## Propagated devel scripts
 
@@ -66,6 +70,76 @@ section for the full flow.
 Other propagated devel tools are type-specific, so a repo receives only the ones
 matching its `REPO_TYPE`. Examples include Python release publishing helpers and
 TypeScript setup/rendering helpers.
+
+## Repository mapping with Graphify
+
+[graphify_map_repo.py](graphify_map_repo.py) builds a queryable map of this
+repository and writes agent orientation to `graphify-out/MANAGER_CONTEXT.md`.
+Read that file before exploring an unfamiliar repository: it names the major
+areas, the architectural hubs, the cross-area connectors, and the map size.
+
+Build or refresh the map, then read the orientation:
+
+```bash
+source source_me.sh && python3 devel/graphify_map_repo.py
+source source_me.sh && python3 devel/graphify_map_repo.py --context
+```
+
+Prefer targeted Graphify traversal over a broad repository sweep:
+
+```bash
+graphify query "<question>" --budget 1500
+graphify explain "<symbol_or_path>"
+graphify affected "<symbol_or_path>" --depth 2
+```
+
+Record what each query was worth, so the map improves with use. Saved outcomes
+accumulate in `graphify-out/memory/`, and `--reflect` aggregates them into
+`graphify-out/reflections/LESSONS.md`:
+
+```bash
+graphify save-result --question "<q>" --answer "<a>" --outcome useful
+source source_me.sh && python3 devel/graphify_map_repo.py --reflect
+```
+
+`graphify-out/` is generated output and stays out of Git, so maps, memory, and
+lessons remain local to each checkout. Scope comes from `.graphifyignore`.
+
+### Browsable map page
+
+`--page` writes `docs/GRAPHIFY.md`: a Mermaid diagram of how the communities
+connect, a size and language summary, a community table, and the most-connected
+symbols in each area. GitHub renders the diagram natively.
+
+```bash
+source source_me.sh && python3 devel/graphify_map_repo.py --page
+```
+
+The page also embeds `docs/GRAPHIFY_map.svg`, a cleaned version of Graphify's
+SVG export with the per-symbol labels stripped and the community legend kept.
+That figure is decorative: it shows cluster shape and scale, not readable
+detail. Graphify renders the export with matplotlib, which is not one of its
+required dependencies, so a machine without matplotlib simply gets the page
+with no figure.
+
+Both files describe the repository they were generated in, so each repository
+regenerates its own and neither is shared between repositories.
+
+### Rust test symbols
+
+Graphify's Rust extractor indexes `#[cfg(test)] mod tests` contents as
+production symbols. Because those modules live inside `src/*.rs`, no ignore rule
+can exclude them without dropping the production code beside them.
+
+In a repository with a `Cargo.toml`, a fresh build therefore extracts without
+clustering, removes those symbols from `graph.json`, and clusters what remains,
+so community detection and hub ranking never see the test suite. The run reports
+how many nodes and links it removed.
+
+Incremental updates do not prune, because re-clustering renumbers communities
+and would strand the stored labels. Orientation still filters test symbols out
+of what it prints, which covers updates and other languages' inline test
+conventions.
 
 ## Running scripts
 
