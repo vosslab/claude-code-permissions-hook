@@ -1,14 +1,25 @@
-claude-code-permissions-hook.toml
-report*.txt
+# === UNIVERSAL === [PROPAGATED - LOCAL EDITS OVERWRITTEN]
 .DS_Store
-# === UNIVERSAL ===
-report_*.txt
-output*/
+/node_modules/
+/.env
+/report_*.txt
+/output*/
+/generated/
+/graphify-out/
 _temp*.?*
-OTHER_REPOS/
-# === RUST ===
+/temp/
+/OTHER_REPOS/
+/LOCAL_ONLY/
+
+# === RUST === [PROPAGATED - LOCAL EDITS OVERWRITTEN]
 /target/
 **/target/
 **/*.rs.bk
 .rust_analyzer/
 
+# -------------------- LOCAL REPOSITORY RULES --------------------
+# ADD YOUR CUSTOM IGNORES BELOW
+# Propagation preserves this section.
+# ------------------ END LOCAL REPOSITORY RULES ------------------
+claude-code-permissions-hook.toml
+report*.txt

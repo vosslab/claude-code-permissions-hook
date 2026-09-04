@@ -1,6 +1,6 @@
 [package]
 name = "claude-code-permissions-hook"
-version = "26.7.0"
+version = "26.9.0"
 edition = "2024"
 authors = ["Neil Voss <https://bsky.app/profile/neilvosslab.bsky.social>", "Korny Sietsma <korny@sietsma.com>"]
 readme = "README.md"

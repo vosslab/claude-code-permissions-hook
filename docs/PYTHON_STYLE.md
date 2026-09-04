@@ -1,5 +1,7 @@
 # PYTHON_STYLE.md
 
+> This file is vendored. Local changes can and will be overwritten by propagation.
+
 Language Model guide to Neil python3 programming
 
 ## Common misconceptions
@@ -174,7 +176,7 @@ volume_text = f"<span style='font-family: monospace;'>{vol1:.1f} mL</span>"
 - For pytest-specific style, test design, and command usage, see [PYTEST_STYLE.md](PYTEST_STYLE.md).
 - For slow end-to-end tests run outside pytest, see [E2E_TESTS.md](E2E_TESTS.md).
 ```bash
-pytest tests/test_pyflakes_code_lint.py
+source source_me.sh && pytest tests/test_pyflakes_code_lint.py
 ```
 
 ## DO NOT USE HEREDOCS
