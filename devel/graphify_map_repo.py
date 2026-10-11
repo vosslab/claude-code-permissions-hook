@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# This file is vendored. Local changes can and will be overwritten by propagation.
+
 """Build or update a Graphify repository map and print concise agent guidance.
 
 Orientation loading and formatting live in devel/graphify_context_lib.py; this
@@ -6,7 +8,6 @@ script owns the command line, the Graphify subprocess lifecycle, and main().
 """
 
 # Standard Library
-import os
 import sys
 import json
 import shutil
@@ -29,8 +30,6 @@ MODE_AUTO = "auto"
 MODE_FRESH = "fresh"
 MODE_UPDATE = "update"
 MODE_CONTEXT = "context"
-MODE_REFLECT = "reflect"
-MODE_PAGE = "page"
 COLLAPSED_EDGE_FIELD = "directed_same_endpoint_collapsed_edges"
 
 
@@ -39,50 +38,16 @@ COLLAPSED_EDGE_FIELD = "directed_same_endpoint_collapsed_edges"
 
 def build_parser() -> argparse.ArgumentParser:
 	"""Build the documented Graphify command-line parser."""
-	manager_context_path = (
-		f"{graphify_context_lib.OUTPUT_DIR_NAME}/"
-		f"{graphify_context_lib.MANAGER_CONTEXT_FILE_NAME}"
-	)
 	help_epilog = (
-		"How it works:\n"
-		f"  With no mode, update {graphify_context_lib.OUTPUT_DIR_NAME}/"
-		f"{graphify_context_lib.GRAPH_FILE_NAME} when it exists; otherwise extract a\n"
-		"  fresh graph. Updates use Graphify's code-only fast path by default. Adding\n"
-		"  --include-docs to --update incrementally extracts changed code and semantic inputs,\n"
-		"  then refreshes community labels. Fresh builds upgrade Graphify, force extraction,\n"
-		"  fully label, and benchmark. --include-docs includes nonignored document, paper, and\n"
-		f"  image inputs. Claude CLI uses {CLAUDE_LABEL_MODEL}; --ollama selects the model for\n"
-		"  extraction and labels. Context prints orientation without running\n"
-		"  Graphify. Before the first map exists, context prints this help instead.\n"
-		"  Incremental builds name only unlabeled communities; fresh builds relabel fully\n"
-		"  and report edge fidelity. --force-shrink lets an update write a smaller graph\n"
-		"  after code was deleted. --deep refines semantic extraction. --global also merges\n"
-		"  this repository into the shared cross-repository graph. Reflect aggregates\n"
-		"  outcomes saved with graphify save-result into a lessons file.\n"
-		"\n"
-		"Examples:\n"
-		"  %(prog)s              # automatically choose fresh or update\n"
-		"  %(prog)s --fresh      # upgrade, extract, fully label, and benchmark\n"
-		"  %(prog)s --fresh --include-docs  # include nonignored semantic inputs\n"
-		"  %(prog)s --update     # update, or run the fresh path when no graph exists\n"
-		"  %(prog)s --update --include-docs  # incrementally refresh semantic inputs\n"
-		"  %(prog)s --fresh --ollama  # use Ollama instead of Claude CLI\n"
-		"  %(prog)s --update --force-shrink  # accept a smaller graph after deleting code\n"
-		"  %(prog)s --fresh --include-docs --deep  # aggressive inferred-edge extraction\n"
-		"  %(prog)s --fresh --global  # also register in the cross-repository graph\n"
-		"  %(prog)s --context    # print orientation without rebuilding\n"
-		"  %(prog)s --reflect    # aggregate saved query outcomes into lessons\n"
-		"\n"
-		f"Fresh-build setup: pip upgrades {GRAPHIFY_PACKAGE}.\n"
-		f"Label backend: Claude CLI with {CLAUDE_LABEL_MODEL}; --ollama pulls {OLLAMA_MODEL}.\n"
-		"Run graphify benchmark directly for measurements outside a fresh build.\n"
-		f"Manager context: {manager_context_path}"
+		"With no flag, update the existing code map or build it when absent. "
+		"Fresh builds relabel communities and benchmark; add --ollama when the Claude "
+		"allowance is exhausted. Add --svg to fresh or update to publish documentation in "
+		"the same run, or use --svg alone to publish the existing map."
 	)
-	# ASVS 2.1.1 and 2.2.1: document the accepted modes and validate against an allowlist.
+	# ASVS 2.1.1 and 2.2.1: expose and document only the fixed action allowlist.
 	parser = argparse.ArgumentParser(
 		description=(
-			"Build or update a Graphify repository map, then print concise agent "
-			"orientation."
+			"Update a Graphify map, rebuild it, inspect context, or publish its docs."
 		),
 		epilog=help_epilog,
 		formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -93,75 +58,36 @@ def build_parser() -> argparse.ArgumentParser:
 		dest="mode",
 		action="store_const",
 		const=MODE_FRESH,
-		help="force a fresh graphify extract, even when a graph already exists",
+		help="rebuild the code map, relabel communities, and benchmark",
 	)
 	mode_group.add_argument(
 		"-U", "--update",
 		dest="mode",
 		action="store_const",
 		const=MODE_UPDATE,
-		help="update an existing graph, or extract fresh when no graph exists",
+		help="update the code map, or build fresh when no map exists",
 	)
 	mode_group.add_argument(
 		"-C", "--context",
 		dest="mode",
 		action="store_const",
 		const=MODE_CONTEXT,
-		help="print existing-map orientation, or help when no map exists",
-	)
-	mode_group.add_argument(
-		"-R", "--reflect",
-		dest="mode",
-		action="store_const",
-		const=MODE_REFLECT,
-		help="aggregate saved query outcomes into the Graphify lessons file",
-	)
-	mode_group.add_argument(
-		"-P", "--page",
-		dest="mode",
-		action="store_const",
-		const=MODE_PAGE,
-		help="write the browsable repository-map page under docs/",
+		help="print existing-map orientation without rebuilding",
 	)
 	parser.add_argument(
-		"-S", "--force-shrink",
-		dest="force_shrink",
+		"-S", "--svg",
+		dest="write_svg",
 		action="store_true",
-		help="let an update write a smaller graph, after code was deleted",
-	)
-	parser.add_argument(
-		"-M", "--deep",
-		dest="deep_extraction",
-		action="store_true",
-		help="use aggressive inferred-edge semantic extraction",
-	)
-	parser.add_argument(
-		"-G", "--global",
-		dest="global_graph",
-		action="store_true",
-		help="also merge this repository into the shared cross-repository graph",
+		help="publish docs/GRAPHIFY.md and its compact community SVG",
 	)
 	parser.add_argument(
 		"-O", "--ollama",
 		dest="label_backend",
 		action="store_const",
 		const=OLLAMA_BACKEND,
-		help=f"use local Ollama model {OLLAMA_MODEL} for extraction and labels",
+		help=f"with --fresh, label locally with {OLLAMA_MODEL}",
 	)
-	parser.add_argument(
-		"-D", "--include-docs",
-		dest="include_docs",
-		action="store_true",
-		help="include nonignored document, paper, and image inputs in fresh or update builds",
-	)
-	parser.set_defaults(
-		mode=MODE_AUTO,
-		label_backend=LABEL_BACKEND,
-		include_docs=False,
-		force_shrink=False,
-		deep_extraction=False,
-		global_graph=False,
-	)
+	parser.set_defaults(mode=MODE_AUTO, label_backend=LABEL_BACKEND, write_svg=False)
 	return parser
 
 
@@ -172,18 +98,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 	"""Parse automatic or explicitly selected Graphify lifecycle modes."""
 	parser = build_parser()
 	args = parser.parse_args(argv)
-	# ASVS 2.1.1 and 2.2.1: semantic extraction requires an explicit lifecycle mode.
-	if args.include_docs and args.mode not in (MODE_FRESH, MODE_UPDATE):
-		parser.error("--include-docs requires --fresh or --update")
-	# Deep mode only affects the semantic extraction pass, not the code-only path.
-	if args.deep_extraction and not args.include_docs:
-		parser.error("--deep requires --include-docs")
-	# Graphify's update subcommand has no global option, so a combination that
-	# could never register the repository is rejected instead of silently ignored.
-	if args.global_graph and args.mode not in (MODE_AUTO, MODE_FRESH):
-		parser.error("--global requires a fresh extraction; use --fresh")
-	if args.force_shrink and args.mode not in (MODE_AUTO, MODE_UPDATE):
-		parser.error("--force-shrink applies only to an update")
+	# ASVS 2.2.1: Ollama has a defined fresh-build purpose, not an implicit fallback.
+	if args.label_backend == OLLAMA_BACKEND and args.mode != MODE_FRESH:
+		parser.error("--ollama requires --fresh")
 	return args
 
 
@@ -275,8 +192,8 @@ def upgrade_graphify(repo_root: pathlib.Path) -> None:
 
 
 def prepare_label_backend(repo_root: pathlib.Path, label_backend: str) -> None:
-	"""Require the selected label backend and prepare its local model when needed."""
-	# ASVS 2.2.1: select the required executable from the supported backend allowlist.
+	"""Require the fresh-build label backend and prepare Ollama when selected."""
+	# ASVS 2.2.1: choose only the two documented fresh-build label backends.
 	if label_backend not in (LABEL_BACKEND, OLLAMA_BACKEND):
 		raise ValueError(f"Unsupported Graphify label backend: {label_backend}")
 	backend_executable = require_command(
@@ -336,76 +253,25 @@ def graph_build_command(
 	graphify_executable: str,
 	repo_root: pathlib.Path,
 	mode: str,
-	include_docs: bool,
-	label_backend: str,
-	deep_extraction: bool = False,
-	global_graph: bool = False,
-	force_shrink: bool = False,
 ) -> tuple[str, list[str], bool]:
 	"""Return the graph operation and whether it performs a fresh extraction."""
-	# ASVS 2.2.1: accept only the two fixed Graphify semantic backends.
-	if label_backend not in (LABEL_BACKEND, OLLAMA_BACKEND):
-		raise ValueError(f"Unsupported Graphify label backend: {label_backend}")
 	is_fresh = graph_build_is_fresh(repo_root, mode)
-	if is_fresh or include_docs:
-		map_scope = "CODE AND SEMANTIC MAP" if include_docs else "CODE MAP"
+	if is_fresh:
 		if is_fresh and mode == MODE_UPDATE:
-			operation = f"NO EXISTING GRAPH; EXTRACTING FRESH GRAPHIFY {map_scope}"
-		elif is_fresh:
-			operation = f"EXTRACTING GRAPHIFY {map_scope}"
+			operation = "NO EXISTING GRAPH; EXTRACTING FRESH GRAPHIFY CODE MAP"
 		else:
-			operation = f"UPDATING GRAPHIFY {map_scope}"
-		command = [graphify_executable, "extract", "."]
-		if include_docs:
-			extraction_model = (
-				OLLAMA_MODEL if label_backend == OLLAMA_BACKEND else CLAUDE_LABEL_MODEL
-			)
-			command.extend(
-				[
-					f"--backend={label_backend}",
-					f"--model={extraction_model}",
-				]
-			)
-			if deep_extraction:
-				command.append("--mode=deep")
-			if is_fresh:
-				command.append("--force")
-		else:
-			command.append("--code-only")
+			operation = "EXTRACTING GRAPHIFY CODE MAP"
+		command = [graphify_executable, "extract", ".", "--code-only"]
 		if repo_has_cargo(repo_root):
 			command.append("--cargo")
 		# Clustering is deferred so it never sees the Rust test symbols that
 		# the prune step is about to remove.
 		if prunes_rust_tests(repo_root, is_fresh):
 			command.append("--no-cluster")
-		# Registration merges this map into the shared cross-repository graph and
-		# is only available on the extract path.
-		if global_graph and is_fresh:
-			command.extend(["--global", f"--as={repo_root.name}"])
 	else:
 		operation = "UPDATING GRAPHIFY CODE MAP"
 		command = [graphify_executable, "update", "."]
-		# Graphify refuses to shrink a graph unless forced, so a refactor that
-		# deleted code otherwise leaves the map silently stale.
-		if force_shrink:
-			command.append("--force")
 	return operation, command, is_fresh
-
-
-#============================================
-
-
-def graph_build_environment(
-	include_docs: bool,
-	label_backend: str,
-) -> dict[str, str] | None:
-	"""Pin the Claude CLI extraction model while preserving the parent environment."""
-	if not include_docs or label_backend != LABEL_BACKEND:
-		return None
-	# ASVS 1.2.5 and 2.2.1: the environment key and model value are fixed constants.
-	environment = os.environ.copy()
-	environment["GRAPHIFY_CLAUDE_CLI_MODEL"] = CLAUDE_LABEL_MODEL
-	return environment
 
 
 #============================================
@@ -415,19 +281,11 @@ def label_graph(
 	graphify_executable: str,
 	repo_root: pathlib.Path,
 	label_backend: str,
-	missing_only: bool = False,
 ) -> None:
-	"""Refresh Graphify community labels with the selected backend.
-
-	An incremental build names only the communities that lack a label. A full
-	relabel would re-pay for an LLM call per community when a handful changed.
-	"""
-	# ASVS 2.2.1: accept only the two documented label backends.
+	"""Label a fresh Graphify map with the selected, validated backend."""
 	if label_backend not in (LABEL_BACKEND, OLLAMA_BACKEND):
 		raise ValueError(f"Unsupported Graphify label backend: {label_backend}")
-	label_model = (
-		OLLAMA_MODEL if label_backend == OLLAMA_BACKEND else CLAUDE_LABEL_MODEL
-	)
+	label_model = OLLAMA_MODEL if label_backend == OLLAMA_BACKEND else CLAUDE_LABEL_MODEL
 	# ASVS 1.2.5: fixed backend and model values remain isolated in the argv list.
 	command = [
 		graphify_executable,
@@ -436,8 +294,6 @@ def label_graph(
 		f"--backend={label_backend}",
 		f"--model={label_model}",
 	]
-	if missing_only:
-		command.append("--missing-only")
 	run_command(command, repo_root)
 
 
@@ -467,6 +323,10 @@ def prune_rust_tests_then_cluster(
 		f"and {summary['removed_links']} links."
 	)
 	print_step("CLUSTERING PRUNED GRAPHIFY CODE MAP")
+	# TEMPORARY: remove this block and normalize_cargo_twins after the upstream fix.
+	remap = graphify_prune_tests.normalize_cargo_twins(graph_path)
+	for alias, canonical in remap.items():
+		print(f"Reconciled Cargo alias {alias} -> {canonical}")
 	run_command([graphify_executable, "cluster-only", ".", "--no-label"], repo_root)
 
 
@@ -504,26 +364,6 @@ def report_graph_diagnostics(
 	print("Distinct relationships between the same two symbols share one edge.")
 
 
-#============================================
-
-
-def reflect_on_saved_results(
-	graphify_executable: str,
-	repo_root: pathlib.Path,
-) -> None:
-	"""Aggregate saved query outcomes into the Graphify lessons file."""
-	print_step("AGGREGATING GRAPHIFY QUERY OUTCOMES")
-	run_command([graphify_executable, "reflect"], repo_root)
-	found_lessons_path = graphify_context_lib.lessons_path(repo_root)
-	if found_lessons_path is None:
-		print("No saved query outcomes yet; record them with graphify save-result.")
-		return
-	print(f"Lessons written to {found_lessons_path.relative_to(repo_root)}")
-
-
-#============================================
-
-
 def validate_core_artifacts(repo_root: pathlib.Path) -> None:
 	"""Require the graph needed for targeted Graphify traversal."""
 	graph_path = (
@@ -552,32 +392,23 @@ def print_context(repo_root: pathlib.Path) -> None:
 	# prints in full and the warning is appended to it.
 	if graphify_context_lib.graph_needs_update(repo_root):
 		print("Map is stale: non-code changes are pending.")
-		print("Refresh it with --update --include-docs.")
+		print("Refresh it with --update.")
 
 
 #============================================
 
 
-def write_map_page(repo_root: pathlib.Path) -> None:
-	"""Write the repository-map page from artifacts, without rebuilding the map."""
+def write_graphify_docs(repo_root: pathlib.Path) -> None:
+	"""Write the Graphify page and compact SVG from an existing graph."""
 	if graphify_context_lib.manager_context(repo_root) is None:
 		print(f"No Graphify map exists in {graphify_context_lib.OUTPUT_DIR_NAME}/ yet.")
 		print("Run without a mode, with --fresh, or with --update to build the first map.")
 		return
-	print_step("WRITING GRAPHIFY REPOSITORY MAP PAGE")
-	graphify_executable = require_command("graphify")
-	page_path, figure_summary = graphify_docs_lib.write_page(graphify_executable, repo_root)
-	if figure_summary is None:
-		print("Figure skipped: graphify export svg was unavailable.")
-	else:
-		source_kb = figure_summary["source_bytes"] / 1024
-		target_kb = figure_summary["target_bytes"] / 1024
-		print(
-			f"Figure cleaned: {source_kb:.0f} KB to {target_kb:.0f} KB, "
-			f"{figure_summary['removed_labels']} node labels removed, "
-			f"{figure_summary['kept_labels']} community labels kept."
-		)
-	print(f"Page written to {page_path.relative_to(repo_root)}")
+	print_step("PUBLISHING GRAPHIFY DOCUMENTATION")
+	# ASVS 5.3.2: the writer owns two fixed paths beneath repository docs/.
+	page_path, figure_path = graphify_docs_lib.write_docs(repo_root)
+	print(f"Graphify page written to {page_path.relative_to(repo_root)}")
+	print(f"Compact SVG written to {figure_path.relative_to(repo_root)}")
 
 
 #============================================
@@ -590,52 +421,33 @@ def main() -> None:
 	require_repo_root(repo_root)
 	if args.mode == MODE_CONTEXT:
 		print_context(repo_root)
+		if args.write_svg:
+			write_graphify_docs(repo_root)
 		return
-	if args.mode == MODE_REFLECT:
-		reflect_on_saved_results(require_command("graphify"), repo_root)
-		return
-	if args.mode == MODE_PAGE:
-		write_map_page(repo_root)
+	# Bare --svg publishes the existing graph without implicitly updating it.
+	if args.mode == MODE_AUTO and args.write_svg:
+		write_graphify_docs(repo_root)
 		return
 
 	is_fresh = graph_build_is_fresh(repo_root, args.mode)
-	needs_labeling = is_fresh or args.include_docs
-	if not needs_labeling and args.label_backend == OLLAMA_BACKEND:
-		raise ValueError("--ollama applies only to fresh or --include-docs builds")
 	if is_fresh:
 		upgrade_graphify(repo_root)
-	if needs_labeling:
 		prepare_label_backend(repo_root, args.label_backend)
 	graphify_executable = require_command("graphify")
 	operation, build_command, is_fresh = graph_build_command(
 		graphify_executable,
 		repo_root,
 		args.mode,
-		args.include_docs,
-		args.label_backend,
-		args.deep_extraction,
-		args.global_graph,
-		args.force_shrink,
 	)
 	print_step(operation)
-	build_environment = graph_build_environment(
-		args.include_docs,
-		args.label_backend,
-	)
-	run_command(build_command, repo_root, build_environment)
+	run_command(build_command, repo_root)
 	if prunes_rust_tests(repo_root, is_fresh):
 		prune_rust_tests_then_cluster(graphify_executable, repo_root)
-	if needs_labeling:
-		print_step("LABELING GRAPHIFY COMMUNITIES")
-		label_graph(
-			graphify_executable,
-			repo_root,
-			args.label_backend,
-			missing_only=not is_fresh,
-		)
 	if is_fresh:
-		map_scope = "CODE AND SEMANTIC MAP" if args.include_docs else "CODE MAP"
-		print_step(f"BENCHMARKING GRAPHIFY {map_scope}")
+		print_step("LABELING GRAPHIFY COMMUNITIES")
+		label_graph(graphify_executable, repo_root, args.label_backend)
+	if is_fresh:
+		print_step("BENCHMARKING GRAPHIFY CODE MAP")
 		run_command([graphify_executable, "benchmark"], repo_root)
 		print_step("CHECKING GRAPHIFY EDGE FIDELITY")
 		report_graph_diagnostics(graphify_executable, repo_root)
@@ -654,6 +466,8 @@ def main() -> None:
 	print(context)
 	print()
 	print(f"Manager context written to {context_path.relative_to(repo_root)}")
+	if args.write_svg:
+		write_graphify_docs(repo_root)
 
 
 if __name__ == "__main__":

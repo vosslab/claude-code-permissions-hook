@@ -1,62 +1,41 @@
 # devel scripts
 
+> This file is vendored. Local changes can and will be overwritten by propagation.
+
 `devel/` holds engineering commands for highly technical maintainers working on
 the repository itself. These commands may require source-tree knowledge, Git,
-development dependencies, or internal fixtures. For regular-user utilities, see
-[tools/TOOLS_README.md](../tools/TOOLS_README.md).
+development dependencies, or internal fixtures. The canonical placement policy
+is [docs/REPO_STYLE.md](../docs/REPO_STYLE.md#scripts-and-executables).
 
 Use this folder for repository lifecycle and engineering work:
 
 - Git, version, release, and changelog maintenance.
 - Dependency refresh, environment setup, builds, packaging, and source generation.
 - Lint, benchmark, probe, diagnostic, screenshot, and engineering-evidence commands.
-- Documentation repair, repository hygiene, and developer helpers shared by propagation.
+- Documentation repair, repository hygiene, and local or vendored engineering helpers.
 
-Put regular-user domain utilities in `tools/`, primary workflows in the
-application CLI, shared test helpers in `tests/`, and reusable behavior in an
-importable package.
+## Placement classifier
 
-## Placement test
-
-Ask what the command consumes and produces. Repository source, Git state,
-manifests, internal fixtures, builds, releases, generated source, benchmarks,
-captures, and diagnostics indicate `devel/`. User-supplied domain data and a
-directly useful domain result indicate `tools/`.
+- Use `devel/` for maintainer and repository-engineering commands.
+- Use [tools/TOOLS_README.md](../tools/TOOLS_README.md) for optional standalone user utilities
+  whose domain input produces a useful domain result.
+- Use the application CLI or package for primary workflows and reusable application behavior.
+- Use an optional local `launchers/` directory for thin compatibility or convenience delegates
+  into the application.
 
 ## Import boundary
 
-Use `tools/`, `devel/`, and `tests/` as entry-point or test-support directories.
-Import reusable behavior from a real package. Vendored `devel/` tooling may use
-flat sibling helpers such as `changelog_lib`, `version_lib`, and `version_files`.
-Place one native helper package in a named root-level folder; use `packages/` to
-group multiple native products or packages. The support-directory gate enforces
-these roles. See
-[tools/TOOLS_README.md](../tools/TOOLS_README.md) for the full boundary and
-consumer migration direction.
-
-## Current root scripts
-
-| File | Kind of work |
-| --- | --- |
-| [bump_version.py](bump_version.py) | Preview and save repo version changes; enter `patch` for the next patch release. |
-| [version_lib.py](version_lib.py) | Shared version parsing and normalization behavior. |
-| [version_files.py](version_files.py) | Discover and update files that carry version metadata. |
-| [changelog_lib.py](changelog_lib.py) | Shared parser and helpers for changelog tools. |
-| [commit_changelog.py](commit_changelog.py) | Draft a commit message from new changelog entries. |
-| [query_changelog.py](query_changelog.py) | Search active and archived changelog entries. |
-| [rotate_changelog.py](rotate_changelog.py) | Move old changelog day blocks into archive files. |
-| [flatten_broken_md_links.py](flatten_broken_md_links.py) | Repair or flatten broken Markdown links. |
-| [dist_clean.sh](dist_clean.sh) | Remove build artifacts, caches, and dependency installs. |
-| [graphify_map_repo.py](graphify_map_repo.py) | Build repository maps and manager orientation for technical maintenance. |
-| [graphify_context_lib.py](graphify_context_lib.py) | Load artifacts and format orientation. |
-| [graphify_docs_lib.py](graphify_docs_lib.py) | Render a browsable repository map. |
-| [graphify_prune_tests.py](graphify_prune_tests.py) | Remove Rust tests before clustering. |
-| [graphify_clean_svg.py](graphify_clean_svg.py) | Shrink an exported SVG figure. |
+Use `tools/`, `devel/`, `tests/`, and `launchers/` as support locations rather than
+repository-level import packages. Maintainer commands in `devel/` may keep the established flat
+sibling-helper pattern used by helpers such as `changelog_lib`, `version_lib`, and `version_files`.
+The support-directory gate preserves this boundary and the homes of locally owned or vendored
+engineering helpers.
 
 ## Propagated devel scripts
 
 Some developer tools arrive by propagation and appear in `devel/` when this repo's
-`REPO_TYPE` calls for them.
+`REPO_TYPE` calls for them. Keep these vendored helpers in `devel/` alongside locally authored
+engineering commands.
 
 `devel/make_release.py` ships to the `scripted`, `compiled`, and `other` families, including
 their descendants (`python`, `pypi`, `rust`, and `swift`). It prepares a GitHub source release:
@@ -85,6 +64,13 @@ source source_me.sh && python3 devel/graphify_map_repo.py
 source source_me.sh && python3 devel/graphify_map_repo.py --context
 ```
 
+Force a full refresh only when needed. Use local Ollama when the Claude allowance is exhausted:
+
+```bash
+source source_me.sh && python3 devel/graphify_map_repo.py --fresh
+source source_me.sh && python3 devel/graphify_map_repo.py --fresh --ollama
+```
+
 Prefer targeted Graphify traversal over a broad repository sweep:
 
 ```bash
@@ -93,37 +79,30 @@ graphify explain "<symbol_or_path>"
 graphify affected "<symbol_or_path>" --depth 2
 ```
 
-Record what each query was worth, so the map improves with use. Saved outcomes
-accumulate in `graphify-out/memory/`, and `--reflect` aggregates them into
-`graphify-out/reflections/LESSONS.md`:
+### Published map page
+
+`--svg` writes both `docs/GRAPHIFY.md` and its compact `docs/GRAPHIFY_map.svg` from an
+existing map:
 
 ```bash
-graphify save-result --question "<q>" --answer "<a>" --outcome useful
-source source_me.sh && python3 devel/graphify_map_repo.py --reflect
+source source_me.sh && python3 devel/graphify_map_repo.py --svg
 ```
 
-`graphify-out/` is generated output and stays out of Git, so maps, memory, and
-lessons remain local to each checkout. Scope comes from `.graphifyignore`.
-
-### Browsable map page
-
-`--page` writes `docs/GRAPHIFY.md`: a Mermaid diagram of how the communities
-connect, a size and language summary, a community table, and the most-connected
-symbols in each area. GitHub renders the diagram natively.
+Add the flag to a build when the map and published documentation should advance together:
 
 ```bash
-source source_me.sh && python3 devel/graphify_map_repo.py --page
+source source_me.sh && python3 devel/graphify_map_repo.py --update --svg
+source source_me.sh && python3 devel/graphify_map_repo.py --fresh --svg
 ```
 
-The page also embeds `docs/GRAPHIFY_map.svg`, a cleaned version of Graphify's
-SVG export with the per-symbol labels stripped and the community legend kept.
-That figure is decorative: it shows cluster shape and scale, not readable
-detail. Graphify renders the export with matplotlib, which is not one of its
-required dependencies, so a machine without matplotlib simply gets the page
-with no figure.
+The figure is generated directly from `graph.json`. It shows the largest twelve communities,
+scales circles by membership, and weights lines by intercommunity relationships. It carries no
+per-symbol labels or legend; names, repository groups, representative symbols, and observations
+remain readable and searchable in the Markdown page.
 
-Both files describe the repository they were generated in, so each repository
-regenerates its own and neither is shared between repositories.
+`graphify-out/` is generated output and stays out of Git. The page and SVG describe the repository
+where they were generated, so neither is shared between repositories. Scope comes from
+`.graphifyignore`.
 
 ### Rust test symbols
 
